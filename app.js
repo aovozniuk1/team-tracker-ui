@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const COLLECTIONS = ['settings', 'people', 'projects', 'activities', 'curriculum', 'learning'];
+  const COLLECTIONS = ['settings', 'people', 'projects', 'activities', 'curriculum', 'learning', 'ci'];
   const LS = 'team-tracker:';
   const S = { data: {}, server: false, dataDir: '', localOverride: false, route: { name: 'dashboard', id: null, tab: null } };
 
@@ -12,6 +12,7 @@
     activities: () => [],
     curriculum: () => ({ courses: [] }),
     learning: () => ({ enrollments: [], progress: {} }),
+    ci: () => ({ collectedAt: '', sources: [] }),
   };
 
   const STATUS = ['active', 'paused', 'parked', 'done'];
@@ -54,6 +55,7 @@
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return d;
     if (c === 'learning') { obj.enrollments = Array.isArray(obj.enrollments) ? obj.enrollments : []; obj.progress = obj.progress && typeof obj.progress === 'object' && !Array.isArray(obj.progress) ? obj.progress : {}; }
     if (c === 'curriculum') obj.courses = Array.isArray(obj.courses) ? obj.courses : [];
+    if (c === 'ci') obj.sources = Array.isArray(obj.sources) ? obj.sources : [];
     return obj;
   }
 
@@ -199,6 +201,21 @@
   const lastOneOnOne = pid => personActs(pid).find(a => a.type === 'one-on-one');
   const openBlockers = () => acts().filter(a => a.type === 'blocker' && !a.resolved).sort(byDateDesc);
   const lessonsOf = c => (c.phases || []).flatMap(ph => (ph.lessons || []).map(l => ({ ...l, phaseId: ph.id, phaseName: ph.name })));
+
+  // ---------- CI snapshot (data/ci.json, written by tools/collect_ci.py)
+  const ci = () => S.data.ci || { collectedAt: '', sources: [] };
+  const ciSource = pid => ci().sources.find(s => s.projectId === pid);
+  const runsOf = s => ((s && s.runs) || []).slice().sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
+  const lastRun = s => runsOf(s)[0];
+  const runResult = r => (r.result || (r.status === 'completed' ? 'unknown' : r.status) || 'unknown').toLowerCase();
+  const resultPill = r => { const res = runResult(r); const cls = /success/.test(res) ? 'green' : /fail|error|timed/.test(res) ? 'red' : /progress|queued|pending|running/.test(res) ? 'yellow' : 'grey'; return pill(cls, label(res.replace(/_/g, ' '))); };
+  const KIND = { github: 'GitHub', bitbucket: 'Bitbucket', local: 'Local folder' };
+  const kindName = k => KIND[k] || label(k);
+  const fmtDur = s => s == null || isNaN(s) ? '' : s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
+  const fmtWhen = iso => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
+  const agoIso = iso => iso ? ago(String(iso).slice(0, 10)) : 'never';
+  const countsText = c => c ? `${c.passed ?? '?'} passed${c.failed ? `, ${c.failed} failed` : ''}${c.broken ? `, ${c.broken} broken` : ''}${c.skipped ? `, ${c.skipped} skipped` : ''} of ${c.total ?? '?'}` : '';
+  const ciAge = () => { const t = ci().collectedAt; if (!t) return null; const h = (Date.now() - new Date(t).getTime()) / 36e5; return { hours: h, stale: h > 6 }; };
   const progressOf = (pid, lid) => learning().progress[`${pid}|${lid}`] || { status: 'not-started' };
   const enrollmentsOf = pid => learning().enrollments.filter(e => e.personId === pid);
 
@@ -229,6 +246,14 @@
       if (n == null) out.push({ lvl: 'grey', text: `${p.name}: no activity logged yet`, href: `#/projects/${p.id}` });
       else if (n > (st.staleProjectDays || 7)) out.push({ lvl: 'yellow', text: `${p.name}: no update for ${n} days`, href: `#/projects/${p.id}` });
     }
+    for (const p of projects()) {
+      if (p.status !== 'active') continue;
+      const s = ciSource(p.id), r = s ? lastRun(s) : null;
+      if (r && /fail|error|timed/.test(runResult(r))) out.push({ lvl: 'red', text: `${p.name}: last CI run failed — ${r.name} (${agoIso(r.startedAt)})`, href: `#/projects/${p.id}/ci` });
+      if (s && s.status === 'error') out.push({ lvl: 'yellow', text: `${p.name}: CI collector cannot read ${s.repoName || 'the source'} — ${trunc(s.error, 80)}`, href: `#/ci` });
+    }
+    const age = ciAge();
+    if (age && age.stale) out.push({ lvl: 'yellow', text: `CI snapshot is ${Math.round(age.hours)} hours old`, href: '#/ci' });
     for (const b of openBlockers()) {
       out.push({ lvl: 'red', text: `Blocker${b.projectId ? ' on ' + (project(b.projectId)?.name || '') : ''}${b.personId ? ' (' + pname(b.personId) + ')' : ''}: ${trunc(b.text, 120)}`, href: b.projectId ? `#/projects/${b.projectId}` : '#/activity' });
     }
@@ -564,9 +589,11 @@
     const bl = openBlockers().filter(b => b.projectId === p.id).length;
     const ms = p.nextMilestone?.text ? `<div class="small"><span class="muted">Next:</span> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` <span class="${p.nextMilestone.due < today() ? 'pill red' : 'muted'}">${esc(p.nextMilestone.due)}</span>` : ''}</div>` : '';
     const wsA = (p.workstreams || []).filter(w => w.status === 'active').length;
+    const s = ciSource(p.id), r = s ? lastRun(s) : null;
+    const ciLine = s ? `<div class="small" style="margin-top:6px">${s.tests ? `<b>${esc(String(s.tests.functions))}</b> tests` : '<span class="muted">tests not counted</span>'}${r ? ` · ${resultPill(r)} <span class="muted">${esc(r.name || '')}, ${esc(agoIso(r.startedAt))}</span>` : ' · <span class="muted">no CI runs</span>'}</div>` : '';
     return `<div class="card clickable" data-href="#/projects/${esc(p.id)}"><h3>${dot(p.health)} <a href="#/projects/${esc(p.id)}">${esc(p.name)}</a> ${pill(p.status)}</h3>
       <div class="meta">Lead: ${p.leadId ? esc(pname(p.leadId)) : '<i>unassigned</i>'}${p.code ? ` · ${esc(p.code)}` : ''}${wsA ? ` · ${wsA} active workstream${wsA === 1 ? '' : 's'}` : ''}${bl ? ` · <span class="pill blocker">${bl} blocker${bl === 1 ? '' : 's'}</span>` : ''}</div>
-      <p class="small" style="margin-top:6px">${esc(trunc(p.healthReason || p.summary, 140))}</p>${ms}
+      <p class="small" style="margin-top:6px">${esc(trunc(p.healthReason || p.summary, 140))}</p>${ms}${ciLine}
       <div class="muted small">${la ? `${esc(trunc(la.text, 90))} — ${esc(ago(la.date))}` : 'no activity logged'}</div></div>`;
   }
 
@@ -593,9 +620,12 @@
       ['Local docs', (p.localDocs || []).map(d => `<span class="mono small">${esc(d.path)}</span> <span class="muted small">— ${esc(d.what)}</span>`).join('<br>')],
       ['Updated', esc(p.updatedOn)],
     ].filter(([, v]) => v);
-    return `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}</div></div>
-      <div class="actions"><button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button><button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button></div></div>
-      ${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}
+    const src = ciSource(id), lr = src ? lastRun(src) : null, tab = S.route.tab === 'ci' ? 'ci' : '';
+    const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${lr ? ' ' + resultPill(lr) : ''}</button></div>`;
+    const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}</div></div>
+      <div class="actions"><button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button><button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button></div></div>`;
+    if (tab === 'ci') return head + tabs + vProjectCI(p);
+    return head + tabs + `${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}
       <div class="grid cols-2">
         <div class="card"><h3>Overview</h3><p>${esc(p.summary || '')}</p><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>${p.notes ? `<h3 style="margin-top:12px">Notes</h3><p class="small" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}</div>
         <div>
@@ -611,6 +641,46 @@
         </tbody></table></div></div>
       <div class="section"><div class="section-head"><h2>Activity${bl.length ? ` · <span class="pill blocker">${bl.length} open blocker${bl.length === 1 ? '' : 's'}</span>` : ''}</h2></div>
         <div class="card">${pa.length ? pa.map(a => actRow(a, { showProject: false })).join('') : '<div class="empty">Nothing logged for this project yet.</div>'}</div></div>`;
+  }
+
+  function vProjectCI(p) {
+    const s = ciSource(p.id);
+    if (!s) return `<div class="card"><div class="empty">No CI source is configured for this project. Add it to <span class="mono">ci-sources.json</span> in the tracker repository and run the collector.</div></div>`;
+    const t = s.tests || {}, runs = runsOf(s);
+    const head = `<div class="card" style="margin-bottom:14px"><h3>${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')} ${s.branch ? `<span class="pill">${esc(s.branch)}</span>` : ''} ${s.status === 'error' ? pill('red', 'collector error') : s.status === 'ok' ? pill('green', 'collected') : pill('grey', label(s.status || 'unknown'))}</h3>
+      <dl class="kv">
+        <dt>Test functions</dt><dd>${t.functions != null ? `<b>${esc(String(t.functions))}</b> in ${esc(String(t.files))} files <span class="muted small">(${esc(t.method || '')}${t.commit ? ', commit ' + esc(t.commit) : ''}, counted ${esc(agoIso(t.countedAt))})</span>` : '<span class="muted">not counted yet</span>'}</dd>
+        <dt>Collected</dt><dd>${s.collectedAt ? `${esc(fmtWhen(s.collectedAt))} UTC <span class="muted">(${esc(agoIso(s.collectedAt))})</span>` : '<span class="muted">never</span>'}</dd>
+        ${s.error ? `<dt>Error</dt><dd class="small" style="color:var(--red-text)">${esc(s.error)}</dd>` : ''}
+        ${s.note ? `<dt>Note</dt><dd class="small">${esc(s.note)}</dd>` : ''}
+        ${(s.reports || []).length ? `<dt>Reports</dt><dd>${s.reports.map(r => link(r.url, r.name)).join(' · ')}</dd>` : ''}
+        ${(s.downloads || []).length ? `<dt>Downloads</dt><dd>${s.downloads.map(d => `${link(d.url, d.name)} <span class="muted small">${d.size ? Math.round(d.size / 1024) + ' KB' : ''}${d.createdAt ? ' · ' + esc(fmtWhen(d.createdAt)) : ''}</span>`).join('<br>')}</dd>` : ''}
+      </dl></div>`;
+    const rows = runs.map(r => `<tr><td class="nowrap small">${esc(fmtWhen(r.startedAt))}<div class="muted">${esc(agoIso(r.startedAt))}</div></td>
+      <td><b>${esc(r.name || '')}</b>${r.title && r.title !== r.name ? `<div class="muted small">${esc(trunc(r.title, 90))}</div>` : ''}${r.number ? `<div class="muted small">#${esc(String(r.number))}</div>` : ''}</td>
+      <td class="small">${esc(r.trigger || '')}${r.branch ? `<div class="muted">${esc(r.branch)}</div>` : ''}</td><td>${resultPill(r)}</td>
+      <td class="small">${r.counts ? esc(countsText(r.counts)) : '<span class="muted">—</span>'}</td><td class="small nowrap">${esc(fmtDur(r.durationSec))}</td>
+      <td class="small">${r.url ? link(r.url, 'run') : ''}${(r.reports || []).map(x => ' · ' + link(x.url, x.name)).join('')}</td></tr>`).join('');
+    const table = runs.length ? `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>When (UTC)</th><th>Job</th><th>Trigger</th><th>Result</th><th>Tests</th><th>Duration</th><th>Open</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="hint" style="margin-top:8px">Allure links open the report in a new tab (save it from there). Test counts appear where the source records them per run.</p>` : '<div class="card"><div class="empty">No runs collected for this source yet.</div></div>';
+    return head + table;
+  }
+
+  function vCI() {
+    const c = ci(), age = ciAge();
+    const rows = projects().filter(p => p.status !== 'done').map(p => {
+      const s = ciSource(p.id), r = s ? lastRun(s) : null, t = s && s.tests;
+      return `<tr><td>${prlink(p.id)}<div class="muted small">${esc(p.code || '')}</div></td>
+        <td class="small">${s ? `${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')}${s.note ? `<div class="muted">${esc(trunc(s.note, 90))}</div>` : ''}` : '<span class="muted">no source configured</span>'}</td>
+        <td>${t ? `<b>${esc(String(t.functions))}</b> <span class="muted small">in ${esc(String(t.files))} files</span>` : '<span class="muted">—</span>'}</td>
+        <td>${r ? `${resultPill(r)} <span class="small">${esc(r.name || '')}</span><div class="muted small">${esc(agoIso(r.startedAt))}${r.counts ? ' · ' + esc(countsText(r.counts)) : ''}</div>` : '<span class="muted">no runs</span>'}</td>
+        <td class="small">${s ? (s.status === 'error' ? `${pill('red', 'error')} <span class="muted">${esc(trunc(s.error, 70))}</span>` : esc(agoIso(s.collectedAt))) : ''}</td>
+        <td class="nowrap"><a class="btn sm" href="#/projects/${esc(p.id)}/ci">runs</a></td></tr>`;
+    }).join('');
+    return `<div class="page-head"><div><h1>CI</h1><div class="sub">${c.collectedAt ? `snapshot from ${esc(fmtWhen(c.collectedAt))} UTC (${esc(agoIso(c.collectedAt))})` : 'nothing collected yet'} · refreshed every 2 h by the “Collect CI status” workflow or by <span class="mono">python tools/collect_ci.py</span></div></div></div>
+      ${age && age.stale ? `<div class="banner">The CI snapshot is ${Math.round(age.hours)} hours old. Check the “Collect CI status” workflow in the tracker repository.</div>` : ''}
+      <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Repository</th><th>Test functions</th><th>Last run</th><th>Collected</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">No projects.</td></tr>'}</tbody></table></div>
+      <p class="hint" style="margin-top:10px">Test functions = <span class="mono">def test_</span> in the repository's test folder at the counted commit; the last-run numbers are what CI actually executed (parametrized cases count separately).</p>`;
   }
 
   function vPeople() {
@@ -732,6 +802,8 @@
       lines.push(`${p.name} — ${p.status}, health ${p.health}${p.healthReason ? ': ' + p.healthReason : ''}`);
       lines.push(`  lead: ${p.leadId ? pname(p.leadId) : 'unassigned'}${(p.memberIds || []).length ? '; also ' + p.memberIds.map(pname).join(', ') : ''}`);
       if (p.nextMilestone?.text) lines.push(`  next: ${p.nextMilestone.text}${p.nextMilestone.due ? ' (due ' + p.nextMilestone.due + ')' : ''}`);
+      const src = ciSource(p.id), lr = src ? lastRun(src) : null;
+      if (src) lines.push(`  tests: ${src.tests ? src.tests.functions + ' functions' : 'not counted'}; last CI run: ${lr ? `${runResult(lr)} — ${lr.name} (${agoIso(lr.startedAt)})${lr.counts ? ', ' + countsText(lr.counts) : ''}` : 'none'}${src.status === 'error' ? '; collector error: ' + src.error : ''}`);
       for (const w of (p.workstreams || []).filter(w => w.status === 'active')) lines.push(`  • ${w.name}${w.ownerId ? ' — ' + pname(w.ownerId) : ''}${w.next ? ': ' + w.next : ''}`);
       for (const b of bl) lines.push(`  BLOCKER: ${b.text}`);
       if (la) lines.push(`  last update ${la.date}: ${trunc(la.text, 160)}`);
@@ -769,7 +841,7 @@
   }
 
   // ---------- nav + router
-  const NAV = [['dashboard', 'Dashboard', '⌂'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['activity', 'Activity', '≡'], ['data', 'Data', '⚙']];
+  const NAV = [['dashboard', 'Dashboard', '⌂'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['activity', 'Activity', '≡'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
   function renderNav() {
     $('#nav').innerHTML = `<div class="brand">Team Tracker<small>${esc(settings().teamName || '')}</small></div>` +
       NAV.map(([k, l, i]) => `<a class="item ${S.route.name === k ? 'active' : ''}" href="#/${k === 'dashboard' ? '' : k}"><span class="ico">${i}</span>${l}</a>`).join('') +
@@ -779,18 +851,18 @@
     const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
     let id = parts[1] || null;
     try { if (id) id = decodeURIComponent(id); } catch { /* keep the raw id; the view reports not found */ }
-    S.route = { name: parts[0] || 'dashboard', id };
+    S.route = { name: parts[0] || 'dashboard', id, tab: parts[2] || null };
   }
   let prevRoute = '';
   function render() {
     parseRoute(); renderNav();
     const v = $('#view'); const r = S.route;
-    const key = `${r.name}/${r.id || ''}`; const sameView = key === prevRoute; prevRoute = key;
+    const key = `${r.name}/${r.id || ''}/${r.tab || ''}`; const sameView = key === prevRoute; prevRoute = key;
     const y = window.scrollY; const mw = $('.matrix-wrap', v); const mx = mw ? [mw.scrollLeft, mw.scrollTop] : null;
     const openPhases = new Set($$('details[data-phase][open]', v).map(d => d.dataset.phase));
     const views = {
       dashboard: () => vDashboard(), projects: () => r.id ? vProject(r.id) : vProjects(), people: () => r.id ? vPerson(r.id) : vPeople(),
-      learning: () => vLearning(r.id), activity: () => vActivity(), data: () => vData(),
+      learning: () => vLearning(r.id), activity: () => vActivity(), ci: () => vCI(), data: () => vData(),
     };
     const notice = S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
