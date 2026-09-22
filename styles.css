@@ -209,8 +209,8 @@ ul.plain li { margin: 2px 0; }
 table.matrix { border-collapse: separate; border-spacing: 0; font-size: .8rem; min-width: 100%; }
 table.matrix th, table.matrix td { border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); padding: 0; }
 table.matrix thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; padding: 6px 4px; font-weight: 600; color: var(--muted); }
-table.matrix thead tr.phases th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; background: var(--surface-2); top: 0; height: 28px; max-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-table.matrix thead tr.lessons th { top: 28px; writing-mode: vertical-rl; transform: rotate(180deg); height: 215px; text-align: left; white-space: nowrap; overflow: hidden; font-weight: 500; font-size: .74rem; }
+table.matrix thead tr.phases th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; background: var(--surface-2); top: 0; height: 28px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 4px 8px; }
+table.matrix thead tr.lessons th { top: 28px; writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; white-space: nowrap; font-weight: 500; font-size: .74rem; padding: 6px 3px; }
 table.matrix th.person, table.matrix thead tr.lessons th.person { position: sticky; left: 0; z-index: 3; background: var(--surface); text-align: left; padding: 6px 10px; writing-mode: horizontal-tb; transform: none; height: auto; min-width: 150px; overflow: visible; }
 table.matrix thead th.person { z-index: 4; }
 table.matrix td.cell { width: 30px; height: 30px; text-align: center; cursor: pointer; user-select: none; }
@@ -278,7 +278,6 @@ table.matrix td.cell.current { box-shadow: inset 0 0 0 2px var(--accent); }
   .kv dt { margin-top: 6px; }
   .field.two { grid-template-columns: minmax(0, 1fr); }
   .lesson-name { width: auto; min-width: 150px; }
-  table.matrix thead tr.lessons th { height: 205px; }
   table.matrix td.cell { width: 40px; height: 40px; }
   .toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
   .fab { display: flex; position: fixed; right: 16px; bottom: calc(66px + env(safe-area-inset-bottom)); width: 50px; height: 50px; border-radius: 50%; background: var(--accent-fill); color: #fff; border: 0; font-size: 26px; align-items: center; justify-content: center; box-shadow: var(--shadow); z-index: 41; cursor: pointer; }

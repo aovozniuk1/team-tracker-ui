@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const COLLECTIONS = ['settings', 'people', 'projects', 'activities', 'curriculum', 'learning', 'ci'];
+  const COLLECTIONS = ['settings', 'people', 'projects', 'activities', 'curriculum', 'learning', 'ci', 'messages'];
   const LS = 'team-tracker:';
   const S = { data: {}, server: false, dataDir: '', localOverride: false, route: { name: 'dashboard', id: null, tab: null } };
 
@@ -13,6 +13,7 @@
     curriculum: () => ({ courses: [] }),
     learning: () => ({ enrollments: [], progress: {} }),
     ci: () => ({ collectedAt: '', sources: [] }),
+    messages: () => [],
   };
 
   const STATUS = ['active', 'paused', 'parked', 'done'];
@@ -215,6 +216,46 @@
   const openBlockers = () => acts().filter(a => a.type === 'blocker' && !a.resolved).sort(byDateDesc);
   const lessonsOf = c => (c.phases || []).flatMap(ph => (ph.lessons || []).map(l => ({ ...l, phaseId: ph.id, phaseName: ph.name })));
 
+  // ---------- who is at this browser, and the thread on a person's page
+  const messages = () => S.data.messages || [];
+  const threadOf = pid => messages().filter(m => m.personId === pid).sort((a, b) => (a.at || '').localeCompare(b.at || ''));
+  const openAsks = pid => threadOf(pid).filter(m => m.question && !m.resolved);
+  function viewerId() { try { return localStorage.getItem(LS + 'viewer') || ''; } catch { return ''; } }
+  function setViewer(id) { try { id ? localStorage.setItem(LS + 'viewer', id) : localStorage.removeItem(LS + 'viewer'); } catch { /* ignore */ } }
+  const viewerName = () => person(viewerId())?.name || 'not set';
+  async function chooseViewer() {
+    if (!people().length) { toast('Add people first'); return; }
+    const v = await form('Who is using this browser?', [
+      { key: 'id', label: 'You are', type: 'select', options: peopleOpts(), allowEmpty: true, emptyLabel: 'not set',
+        help: 'Kept on this device only, so your posts are signed.' },
+    ], { id: viewerId() });
+    if (!v) return;
+    setViewer(v.id); render();
+  }
+  async function postMessage(pid, question) {
+    if (!viewerId()) { await chooseViewer(); if (!viewerId()) { toast('Say who you are first'); return; } }
+    const v = await form(question ? 'Ask a question' : 'Leave a note', [
+      { key: 'text', label: question ? 'Your question' : 'Message', type: 'textarea', required: true, rows: 5,
+        help: question ? 'It stays marked open until someone marks it answered.' : 'Everyone who opens this profile can read it.' },
+    ], {});
+    if (!v) return;
+    messages().push({ id: uid('m'), personId: pid, authorId: viewerId(), at: new Date().toISOString(), text: v.text, question: !!question, resolved: false });
+    await save('messages'); render();
+  }
+  async function toggleAnswered(id) {
+    const m = messages().find(x => x.id === id); if (!m) return;
+    m.resolved = !m.resolved;
+    m.resolvedBy = m.resolved ? viewerId() : '';
+    m.resolvedAt = m.resolved ? new Date().toISOString() : '';
+    await save('messages'); render();
+  }
+  async function deleteMessage(id) {
+    const m = messages().find(x => x.id === id); if (!m) return;
+    if (!confirm('Remove this message?')) return;
+    S.data.messages = messages().filter(x => x.id !== id);
+    await save('messages'); render();
+  }
+
   // ---------- CI snapshot (data/ci.json, written by tools/collect_ci.py)
   const ci = () => S.data.ci || { collectedAt: '', sources: [] };
   const ciSource = pid => ci().sources.find(s => s.projectId === pid);
@@ -346,6 +387,10 @@
     for (const b of openBlockers()) {
       out.push({ lvl: 'red', text: `Blocker${b.projectId ? ' on ' + (project(b.projectId)?.name || '') : ''}${b.personId ? ' (' + pname(b.personId) + ')' : ''}: ${trunc(b.text, 120)}`, href: b.projectId ? `#/projects/${b.projectId}` : '#/activity' });
     }
+    for (const p of activePeople()) {
+      const q = openAsks(p.id);
+      if (q.length) out.push({ lvl: 'yellow', text: `${p.name}: ${q.length} open question${q.length === 1 ? '' : 's'}, oldest ${ago((q[0].at || '').slice(0, 10))}`, href: `#/people/${p.id}/questions` });
+    }
     for (const m of mentees()) {
       const o = lastOneOnOne(m.id);
       if (!o) out.push({ lvl: 'grey', text: `${m.name}: no 1:1 logged yet`, href: `#/people/${m.id}` });
@@ -474,8 +519,10 @@
     location.hash = `#/projects/${np.id}`; render();
   }
 
+  const TRANSLIT = { а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'ie', ж: 'zh', з: 'z', и: 'y', і: 'i', ї: 'i', й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ь: '', ю: 'iu', я: 'ia', ы: 'y', э: 'e', ъ: '', ё: 'e' };
   function slug(s) {
-    const base = String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || uid('p');
+    const latin = String(s || '').toLowerCase().split('').map(ch => (ch in TRANSLIT ? TRANSLIT[ch] : ch)).join('');
+    const base = latin.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || uid('p');
     let id = base, n = 2; while (project(id) || person(id)) id = `${base}-${n++}`; return id;
   }
 
@@ -845,39 +892,70 @@
           <div class="meta">${esc(p.title || '')}${p.startedOn ? ` · since ${esc(p.startedOn)}` : ''}</div>
           ${p.focus ? `<p class="small" style="margin-top:6px"><span class="muted">Focus:</span> ${esc(p.focus)}</p>` : ''}
           <div class="small"><span class="muted">Projects:</span> ${prs.map(x => esc(x.name)).join(', ') || '—'}</div>
-          <div class="small"><span class="muted">Last 1:1:</span> ${o ? esc(ago(o.date)) : 'never'}</div>
+          <div class="small"><span class="muted">Last 1:1:</span> ${o ? esc(ago(o.date)) : 'never'}${openAsks(p.id).length ? ' · ' + pill('yellow', openAsks(p.id).length + ' open') : ''}</div>
           ${lr.map(cs => `<div class="small" style="margin-top:6px"><b>${cs.pct}%</b> ${esc(cs.course.name)}${cs.current ? ` · <span class="muted">${esc(cs.current.title)}</span>` : ''}</div>${progressBar(cs)}`).join('')}
         </div>`;
       }).join('') || '<div class="empty">No people yet.</div>'}</div>`;
   }
 
+  function learningBlock(id, e) {
+    const cs = courseSummary(id, e.courseId); if (!cs) return '';
+    const c = cs.course;
+    return `<div class="card" style="margin-bottom:14px"><div class="section-head"><h3>${esc(c.name)} ${e.track ? pill('purple', e.track) : ''}</h3><div class="actions"><a class="btn sm" href="#/learning/${esc(c.id)}">matrix</a><button class="btn sm" data-act="edit-enroll" data-person="${esc(id)}" data-course="${esc(c.id)}">edit</button><button class="btn sm" data-act="unenroll" data-person="${esc(id)}" data-course="${esc(c.id)}">remove</button></div></div>
+      <div class="small muted">${e.startedOn ? `since ${esc(e.startedOn)} \u00b7 ` : ''}${cs.complete}/${cs.total} lessons \u00b7 ${cs.counts['gate-passed']} gates \u00b7 last mark ${esc(ago(cs.lastDate))}${e.goal ? ` \u00b7 goal: ${esc(e.goal)}` : ''}</div>
+      <div style="margin:6px 0 10px">${progressBar(cs)}</div>
+      ${cs.current ? `<div class="small" style="margin-bottom:8px"><span class="muted">Now on:</span> <b>${esc(cs.current.title)}</b> <span class="muted">(${esc(cs.current.phaseName)})</span></div>` : '<div class="small" style="margin-bottom:8px">Course complete.</div>'}
+      ${(c.phases || []).map(ph => { const ls = ph.lessons || []; const done = ls.filter(l => ['done', 'gate-passed'].includes(progressOf(id, l.id).status)).length;
+        return `<details data-phase="${esc(c.id + ':' + ph.id)}" ${ls.some(l => l.id === cs.current?.id) ? 'open' : ''}><summary class="small"><b>${esc(ph.name)}</b> <span class="muted">${done}/${ls.length}</span></summary>
+          <div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Lesson</th><th>Status</th><th>Marked</th><th>Note</th><th></th></tr></thead><tbody>${ls.map(l => { const pr = progressOf(id, l.id); return `<tr><td class="lesson-name">${esc(l.title)}${l.gate ? `<div class="muted" style="font-size:.75rem">gate: ${esc(l.gate)}</div>` : ''}</td><td><select class="lesson-status" data-person="${esc(id)}" data-lesson="${esc(l.id)}">${LESSON_STATUS.map(st => `<option value="${st}"${pr.status === st ? ' selected' : ''}>${label(st)}</option>`).join('')}</select></td><td class="muted nowrap">${esc(pr.date || '')}</td><td class="muted">${esc(pr.note || '')}</td><td><button class="btn sm" data-act="edit-lesson" data-person="${esc(id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="note or date">note</button></td></tr>`; }).join('')}</tbody></table></div></details>`; }).join('')}
+    </div>`;
+  }
+
+  function vPersonLearning(p) {
+    const enr = enrollmentsOf(p.id);
+    if (!enr.length) return `<div class="card"><div class="empty">Not enrolled in any course yet. Use \u201cEnroll in course\u201d above.</div></div>`;
+    return enr.map(e => learningBlock(p.id, e)).join('');
+  }
+
+  function vPersonThread(p) {
+    const thread = threadOf(p.id), me = viewerId();
+    const bubble = m => `<div class="row"><div class="body">
+        <div class="small"><b>${esc(m.authorId ? pname(m.authorId) : 'someone')}</b> <span class="muted">${esc(fmtWhen(m.at))}</span> ${m.question ? (m.resolved ? pill('green', 'answered') : pill('yellow', 'open question')) : ''}${m.authorId === me ? ' ' + pill('accent', 'you') : ''}</div>
+        <div class="txt">${esc(m.text)}</div>
+        ${m.resolved && m.resolvedBy ? `<div class="muted small">answered by ${esc(pname(m.resolvedBy))}${m.resolvedAt ? ' \u00b7 ' + esc(fmtWhen(m.resolvedAt)) : ''}</div>` : ''}
+      </div><div class="ops">${m.question ? `<button class="btn sm" data-act="answer-msg" data-id="${esc(m.id)}" title="${m.resolved ? 'reopen' : 'mark answered'}">${m.resolved ? 'reopen' : 'answered'}</button>` : ''}<button class="btn sm" data-act="del-msg" data-id="${esc(m.id)}">remove</button></div></div>`;
+    return `<div class="card"><div class="section-head"><h3>Questions and notes</h3>
+        <div class="actions"><button class="btn primary" data-act="ask" data-person="${esc(p.id)}">Ask a question</button><button class="btn" data-act="note" data-person="${esc(p.id)}">Leave a note</button></div></div>
+      <p class="hint">${me ? `Posting as <b>${esc(viewerName())}</b>. <a href="#" data-act="who">Change</a>` : '<a href="#" data-act="who">Say who you are</a> before posting.'}</p>
+      ${thread.length ? thread.map(bubble).join('') : '<div class="empty">Nothing here yet. Ask the first question.</div>'}</div>`;
+  }
+
   function vPerson(id) {
     const p = person(id); if (!p) return `<div class="empty">Person not found. <a href="#/people">Back</a></div>`;
     const pa = personActs(id), ones = pa.filter(a => a.type === 'one-on-one'), others = pa.filter(a => a.type !== 'one-on-one');
-    const prs = personProjects(id);
-    const enr = enrollmentsOf(id);
+    const prs = personProjects(id), enr = enrollmentsOf(id), nq = openAsks(id).length;
     const kv = [['Role', label(p.role)], ['Title', p.title], ['Track', p.track && label(p.track)], ['Started', p.startedOn], ['Learning h/week', p.weeklyLearningHours], ['1:1 slot', p.oneOnOneSlot], ['Focus', p.focus]].filter(([, v]) => v !== undefined && v !== null && v !== '');
-    const learnBlocks = enr.map(e => {
-      const cs = courseSummary(id, e.courseId); if (!cs) return '';
-      const c = cs.course;
-      return `<div class="card" style="margin-bottom:14px"><div class="section-head"><h3>${esc(c.name)} ${e.track ? pill('purple', e.track) : ''}</h3><div class="actions"><a class="btn sm" href="#/learning/${esc(c.id)}">matrix</a><button class="btn sm" data-act="edit-enroll" data-person="${esc(id)}" data-course="${esc(c.id)}">✎</button><button class="btn sm" data-act="unenroll" data-person="${esc(id)}" data-course="${esc(c.id)}">🗑</button></div></div>
-        <div class="small muted">${e.startedOn ? `since ${esc(e.startedOn)} · ` : ''}${cs.complete}/${cs.total} lessons · ${cs.counts['gate-passed']} gates · last mark ${esc(ago(cs.lastDate))}${e.goal ? ` · goal: ${esc(e.goal)}` : ''}</div>
-        <div style="margin:6px 0 10px">${progressBar(cs)}</div>
-        ${cs.current ? `<div class="small" style="margin-bottom:8px"><span class="muted">Now on:</span> <b>${esc(cs.current.title)}</b> <span class="muted">(${esc(cs.current.phaseName)})</span></div>` : '<div class="small" style="margin-bottom:8px">Course complete.</div>'}
-        ${(c.phases || []).map(ph => { const ls = ph.lessons || []; const done = ls.filter(l => ['done', 'gate-passed'].includes(progressOf(id, l.id).status)).length;
-          return `<details data-phase="${esc(c.id + ':' + ph.id)}" ${ls.some(l => l.id === cs.current?.id) ? 'open' : ''}><summary class="small"><b>${esc(ph.name)}</b> <span class="muted">${done}/${ls.length}</span></summary>
-            <div class="tbl-wrap"><table class="tbl small"><tbody>${ls.map(l => { const pr = progressOf(id, l.id); return `<tr><td class="lesson-name">${esc(l.title)}${l.gate ? `<div class="muted" style="font-size:.75rem">gate: ${esc(l.gate)}</div>` : ''}</td><td><select class="lesson-status" data-person="${esc(id)}" data-lesson="${esc(l.id)}">${LESSON_STATUS.map(s => `<option value="${s}"${pr.status === s ? ' selected' : ''}>${label(s)}</option>`).join('')}</select></td><td class="muted">${esc(pr.date || '')}</td><td class="muted">${esc(pr.note || '')}</td><td><button class="btn sm" data-act="edit-lesson" data-person="${esc(id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}">✎</button></td></tr>`; }).join('')}</tbody></table></div></details>`; }).join('')}
-      </div>`;
-    }).join('');
-    return `<div class="page-head"><div><h1>${esc(p.name)} ${p.active === false ? pill('grey', 'inactive') : ''}</h1><div class="sub">${esc(p.title || label(p.role))}</div></div>
+    const tab = ['learning', 'questions'].includes(S.route.tab) ? S.route.tab : '';
+    const head = `<div class="page-head"><div><h1>${esc(p.name)} ${p.active === false ? pill('grey', 'inactive') : ''}${viewerId() === id ? ' ' + pill('accent', 'you') : ''}</h1><div class="sub">${esc(p.title || label(p.role))}</div></div>
       <div class="actions"><button class="btn" data-act="log-11" data-person="${esc(id)}">Log 1:1</button><button class="btn" data-act="log-act" data-person="${esc(id)}">Log activity</button><button class="btn" data-act="enroll" data-person="${esc(id)}">Enroll in course</button><button class="btn primary" data-act="edit-person" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-person" data-id="${esc(id)}">Remove</button></div></div>
-      <div class="grid cols-2">
+      <div class="tabs">
+        <button class="${tab ? '' : 'active'}" data-href="#/people/${esc(id)}">Profile</button>
+        <button class="${tab === 'learning' ? 'active' : ''}" data-href="#/people/${esc(id)}/learning">Learning${enr.length ? ` <span class="pill">${enr.length}</span>` : ''}</button>
+        <button class="${tab === 'questions' ? 'active' : ''}" data-href="#/people/${esc(id)}/questions">Questions${nq ? ` <span class="pill yellow">${nq} open</span>` : threadOf(id).length ? ` <span class="pill">${threadOf(id).length}</span>` : ''}</button>
+      </div>`;
+
+    if (tab === 'learning') return head + vPersonLearning(p);
+    if (tab === 'questions') return head + vPersonThread(p);
+
+    const summary = enr.map(e => { const cs = courseSummary(id, e.courseId); return cs ? `<div class="small" style="margin-top:8px"><b>${cs.pct}%</b> ${esc(cs.course.name)}${cs.current ? ` \u00b7 <span class="muted">now on ${esc(cs.current.title)}</span>` : ' \u00b7 <span class="muted">complete</span>'}</div>${progressBar(cs)}` : ''; }).join('');
+    return head + `<div class="grid cols-2">
         <div><div class="card" style="margin-bottom:14px"><h3>Profile</h3><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>${p.notes ? `<p class="small" style="white-space:pre-wrap;margin-top:10px">${esc(p.notes)}</p>` : ''}</div>
-          <div class="card" style="margin-bottom:14px"><h3>Projects</h3>${prs.length ? `<ul class="plain">${prs.map(pr => `<li>${prlink(pr.id)} <span class="muted small">— ${esc(personRoleIn(pr, id))}</span> ${dot(pr.health)} ${pill(pr.status)}</li>`).join('')}</ul>` : '<div class="empty">Not assigned to any project. Set them as lead or member in the project.</div>'}</div>
+          <div class="card" style="margin-bottom:14px"><h3>Projects</h3>${prs.length ? `<ul class="plain">${prs.map(pr => `<li>${prlink(pr.id)} <span class="muted small">\u2014 ${esc(personRoleIn(pr, id))}</span> ${dot(pr.health)} ${pill(pr.status)}</li>`).join('')}</ul>` : '<div class="empty">Not assigned to any project. Set them as lead or member in the project.</div>'}</div>
           <div class="card"><div class="section-head"><h3>1:1 journal</h3><span class="hint">${ones.length} entries</span></div>${ones.length ? ones.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">No 1:1 logged yet.</div>'}</div></div>
-        <div><h2 style="margin-bottom:10px">Learning</h2>${learnBlocks || '<div class="card"><div class="empty">Not enrolled in any course. Use “Enroll in course”.</div></div>'}</div>
-      </div>
-      <div class="section" style="margin-top:14px"><div class="section-head"><h2>Other activity</h2></div><div class="card">${others.length ? others.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">Nothing logged.</div>'}</div></div>`;
+        <div><div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Learning</h3><a class="btn sm" href="#/people/${esc(id)}/learning">open</a></div>${summary || '<div class="empty">Not enrolled in any course.</div>'}</div>
+          <div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Questions</h3><a class="btn sm" href="#/people/${esc(id)}/questions">open</a></div>${nq ? openAsks(id).slice(0, 3).map(m => `<div class="row"><div class="body"><div class="txt small">${esc(trunc(m.text, 120))}</div><div class="muted small">${esc(pname(m.authorId))} \u00b7 ${esc(fmtWhen(m.at))}</div></div></div>`).join('') : `<div class="empty">${threadOf(id).length ? 'No open questions.' : 'Nothing asked yet.'}</div>`}</div>
+          <div class="card"><div class="section-head"><h3>Other activity</h3></div>${others.length ? others.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">Nothing logged.</div>'}</div></div>
+      </div>`;
   }
 
   function vLearning(courseId) {
@@ -885,6 +963,8 @@
     const c = course(courseId) || cs[0];
     const ls = lessonsOf(c);
     const enrolled = learning().enrollments.filter(e => e.courseId === c.id).map(e => person(e.personId)).filter(Boolean);
+    // the rotated header is as tall as the longest lesson title needs, so nothing is clipped
+    const headH = Math.min(520, Math.max(150, Math.round(ls.reduce((n, l) => Math.max(n, (l.title || '').length), 0) * 7.1) + 18));
     const cols = (c.phases || []).map(ph => `<th colspan="${(ph.lessons || []).length}" title="${esc(ph.name)}${ph.weeks ? ' · ' + esc(ph.weeks) : ''}">${esc(ph.name)}</th>`).join('');
     const rows = enrolled.map(p => { const sm = courseSummary(p.id, c.id); return `<tr><th class="person">${plink(p.id)}<div class="muted" style="font-weight:400">${sm.pct}% · ${sm.complete}/${sm.total}</div></th>${ls.map(l => { const pr = progressOf(p.id, l.id); return `<td class="cell ${pr.status}${sm.current?.id === l.id ? ' current' : ''}" data-person="${esc(p.id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="${esc(l.title)} — ${label(pr.status)}${pr.date ? ' · ' + esc(pr.date) : ''}${pr.note ? '&#10;' + esc(pr.note) : ''}">${LESSON_GLYPH[pr.status] || ''}</td>`; }).join('')}</tr>`; }).join('');
     return `<div class="page-head"><div><h1>Learning</h1><div class="sub">${cs.length} course${cs.length === 1 ? '' : 's'} · tap a cell to advance its status; right-click, shift-click or long-press to set a note or date</div></div>
@@ -898,7 +978,7 @@
       </div>
       <div class="legend"><span><span class="sw" style="background:transparent"></span>not started</span><span><span class="sw" style="background:color-mix(in srgb,var(--yellow) 45%,transparent)"></span>in progress</span><span><span class="sw" style="background:color-mix(in srgb,var(--green) 55%,transparent)"></span>done</span><span><span class="sw" style="background:var(--green)"></span>★ gate passed</span><span><span class="sw" style="background:color-mix(in srgb,var(--red) 60%,transparent)"></span>! stuck</span><span><span class="sw" style="box-shadow:inset 0 0 0 2px var(--accent)"></span>current lesson</span></div>
       <div class="hint" style="margin-top:8px" aria-live="polite">${S.lastCell ? `${esc(S.lastCell.person)} · ${esc(S.lastCell.title)} → <b>${esc(label(S.lastCell.status))}</b>` : 'The lesson and new status of the last cell you tap show here.'}</div>
-      <div class="matrix-wrap" style="margin-top:8px"><table class="matrix"><thead><tr class="phases"><th class="person"></th>${cols}</tr><tr class="lessons"><th class="person">Person</th>${ls.map(l => `<th title="${esc(l.title)}">${esc(trunc(l.title, 28))}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td class="empty" colspan="${ls.length + 1}" style="padding:14px">Nobody enrolled yet — use “Enroll someone”.</td></tr>`}</tbody></table></div>
+      <div class="matrix-wrap" style="margin-top:8px"><table class="matrix"><thead><tr class="phases"><th class="person"></th>${cols}</tr><tr class="lessons"><th class="person">Person</th>${ls.map(l => `<th title="${esc(l.title)}" style="height:${headH}px">${esc(l.title)}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td class="empty" colspan="${ls.length + 1}" style="padding:14px">Nobody enrolled yet — use “Enroll someone”.</td></tr>`}</tbody></table></div>
       <div class="section" style="margin-top:20px"><div class="section-head"><h2>Lesson index</h2></div><div class="card tbl-wrap"><table class="tbl small"><thead><tr><th>#</th><th>Phase</th><th>Lesson</th><th>File</th><th>Gate / capstone</th></tr></thead><tbody>${ls.map((l, i) => `<tr><td>${i + 1}</td><td class="muted">${esc(l.phaseName)}</td><td>${esc(l.title)}</td><td class="mono muted">${esc(l.file || '')}</td><td class="muted">${esc(l.gate || l.capstone || '')}</td></tr>`).join('')}</tbody></table></div></div>`;
   }
 
@@ -1006,7 +1086,8 @@
   function renderNav() {
     $('#nav').innerHTML = `<div class="brand">Team Tracker<small>${esc(settings().teamName || '')}</small></div>` +
       NAV.map(([k, l, i]) => `<a class="item ${S.route.name === k ? 'active' : ''}" href="#/${k === 'dashboard' ? '' : k}"><span class="ico">${i}</span>${l}${k === 'ci' && allLive().length ? ' <span class="live-dot"></span>' : ''}</a>`).join('') +
-      `<div class="spacer"></div><div class="status"><span class="dot ${S.backend === 'static' ? '' : 'on'}"></span>${S.backend === 'server' ? 'saving to data/' : S.backend === 'github' ? `GitHub · ${esc(ghConfig().owner)}/${esc(ghConfig().repo)}` : 'browser-only mode'}</div>`;
+      `<div class="spacer"></div><div class="status"><a href="#" data-act="who" title="who is at this browser">You: ${esc(viewerName())}</a></div>` +
+      `<div class="status"><span class="dot ${S.backend === 'static' ? '' : 'on'}"></span>${S.backend === 'server' ? 'saving to data/' : S.backend === 'github' ? `GitHub · ${esc(ghConfig().owner)}/${esc(ghConfig().repo)}` : 'browser-only mode'}</div>`;
   }
   function parseRoute() {
     const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -1084,6 +1165,11 @@
       case 'edit-lesson': return editLesson(d.person, d.lesson, d.title);
       case 'settings': return editSettings();
       case 'summary': return showSummary();
+      case 'ask': return postMessage(d.person, true);
+      case 'note': return postMessage(d.person, false);
+      case 'answer-msg': return toggleAnswered(d.id);
+      case 'del-msg': return deleteMessage(d.id);
+      case 'who': return chooseViewer();
       case 'run-ci': return runCI(d.project, d.group);
       case 'refresh-ci': return refreshCI(b);
       case 'gh-connect': return connectGitHub();
