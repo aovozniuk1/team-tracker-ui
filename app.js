@@ -330,6 +330,30 @@
     }, 60000);
   }
 
+  // GitHub's own scheduler is unreliable for a young repository, so a stale snapshot is also
+  // refreshed by whoever opens the page: once per session, quietly, and only when it is old.
+  async function autoRefreshIfStale() {
+    if (S.autoRefreshed || S.backend !== 'github') return;
+    const t = snapAt();
+    if (t && (Date.now() - new Date(t).getTime()) / 36e5 < (settings().autoCollectAfterHours ?? 3)) return;
+    S.autoRefreshed = true;
+    const cfg = ghConfig();
+    try {
+      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/actions/workflows/collect-ci.yml/dispatches`, {
+        method: 'POST', headers: { ...ghHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: cfg.branch }),
+      });
+      if (r.status !== 204) return;
+      toast('The CI snapshot was stale; collecting in the background.');
+      for (let i = 0; i < 24; i++) {
+        await new Promise(res => setTimeout(res, 5000));
+        try {
+          const fresh = await fetchCollection('ci');
+          if (fresh && fresh.collectedAt && fresh.collectedAt !== t) { S.data.ci = normalize('ci', fresh); render(); return; }
+        } catch { /* keep waiting */ }
+      }
+    } catch { /* the page still shows how old the snapshot is */ }
+  }
+
   async function refreshCI(btn) {
     if (S.backend !== 'github') { toast('Connect this page to GitHub first (Data → Connect to GitHub)'); return; }
     const cfg = ghConfig(), before = ci().collectedAt;
@@ -692,6 +716,8 @@
       { key: 'oneOnOneCadenceDays', label: '1:1 cadence (days)', type: 'number' },
       { key: 'staleProjectDays', label: 'Project counts as stale after (days)', type: 'number' },
       { key: 'staleLearningDays', label: 'Learning counts as stale after (days)', type: 'number' },
+      { key: 'autoCollectAfterHours', label: 'Collect CI on open when the snapshot is older than (hours)', type: 'number',
+        help: 'Opening the page then starts a collection itself, so the data does not depend on the scheduled job alone.' },
     ], settings());
     if (!v) return;
     Object.assign(settings(), v); await save('settings'); render();
@@ -1225,5 +1251,5 @@
 
   window.addEventListener('hashchange', render);
   applyTheme();
-  load().then(render);
+  load().then(() => { render(); autoRefreshIfStale(); });
 })();
