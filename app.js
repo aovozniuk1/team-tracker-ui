@@ -81,7 +81,7 @@
     const j = await r.json();
     if (j.encoding !== 'base64' || typeof j.content !== 'string') throw new Error(`data/${c}.json is too large for the GitHub contents API (1 MB limit)`);
     S.etags[c] = j.sha;
-    return JSON.parse(b64decode(j.content));
+    try { return JSON.parse(b64decode(j.content)); } catch { throw new Error(`data/${c}.json in the repository is not valid JSON`); }
   }
   async function ghPut(c, obj) {
     const g = ghConfig();
@@ -127,7 +127,9 @@
     S.backend = S.server ? 'server' : ghReady() ? 'github' : 'static';
     for (const c of COLLECTIONS) {
       let obj = null;
-      try { obj = await fetchCollection(c); } catch (e) { if (S.server) S.broken.add(c); if (S.backend === 'github') S.ghError = e.message; }
+      if (!(S.backend === 'github' && S.ghError)) {
+        try { obj = await fetchCollection(c); } catch (e) { if (S.server) S.broken.add(c); if (S.backend === 'github') S.ghError = e.message; }
+      }
       if (S.backend === 'static') {
         try { const ls = localStorage.getItem(LS + c); if (ls) { obj = JSON.parse(ls); S.localOverride = true; } } catch { /* ignore */ }
       }
