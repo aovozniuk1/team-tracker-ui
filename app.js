@@ -669,6 +669,7 @@
   async function runCI(projectId, groupId) {
     const s = ciSource(projectId), g = (s && (s.groups || []).find(x => x.id === groupId)) || null;
     if (!g) return;
+    if (!mayRun(s, g)) { toast(`Only ${(s.allowedActors || []).join(', ') || 'the lead'} can start this one.`); return; }
     if (S.backend !== 'github') { toast('Connect this page to GitHub first (Data → Connect to GitHub)'); return; }
     if (!confirm(`Start “${g.title}” on ${s.repoName}?\n\nThis runs the real suite against that environment.`)) return;
     const cfg = ghConfig();
@@ -816,6 +817,9 @@
   }
 
   const KIND_TITLE = { regression: 'Regression', load: 'Load test', suite: 'Targeted suite', deploy: 'On every deploy', other: 'Other' };
+  // The page only mirrors the rule; dispatch_run.py is what actually refuses a restricted target.
+  const actorLogin = () => (S.ghUser || person(viewerId())?.githubLogin || '').toLowerCase();
+  const mayRun = (s, g) => !g.restricted || S.backend === 'server' || (s.allowedActors || []).some(a => a.toLowerCase() === actorLogin());
   const runsOfGroup = (s, gid) => runsOf(s).filter(r => r.group === gid);
 
   function vProjectCI(p) {
@@ -864,7 +868,9 @@
           <td class="small nowrap">${last ? esc(fmtDur(last.durationSec)) : ''}</td>
           <td class="small nowrap">${history || '<span class="muted">—</span>'}</td>
           <td class="small">${groupAllure}</td>
-          <td class="nowrap"><button class="btn sm primary" data-act="run-ci" data-project="${esc(p.id)}" data-group="${esc(g.id)}" title="Start this run now">▶ Run</button>${g.workflowUrl ? ' ' + link(g.workflowUrl, 'on ' + (s.kind === 'github' ? 'GitHub' : 'Bitbucket')) : ''}</td></tr>`;
+          <td class="nowrap">${mayRun(s, g)
+            ? `<button class="btn sm primary" data-act="run-ci" data-project="${esc(p.id)}" data-group="${esc(g.id)}" title="Start this run now">▶ Run</button>`
+            : `<button class="btn sm" disabled title="Only ${esc((s.allowedActors || []).join(', ') || 'the lead')} can start this one${s.restrictedNote ? ' — ' + esc(s.restrictedNote) : ''}">🔒 Run</button>`}${g.workflowUrl ? ' ' + link(g.workflowUrl, 'on ' + (s.kind === 'github' ? 'GitHub' : 'Bitbucket')) : ''}</td></tr>`;
       }).join('');
       return `<div class="section"><div class="section-head"><h3>${esc(KIND_TITLE[kind] || label(kind))}</h3></div>
         <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Environment</th><th>Last run (UTC)</th><th>Result</th><th>Tests</th><th>Duration</th><th>Runs before it</th><th>Report</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
