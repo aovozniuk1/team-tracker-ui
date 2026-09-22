@@ -135,12 +135,18 @@
   }
 
   async function load() {
-    S.broken = new Set(); S.etags = {}; S.ghError = '';
+    S.broken = new Set(); S.etags = {}; S.ghError = ''; S.ghUser = '';
     try {
       const r = await fetch('/api/_meta', { cache: 'no-store' });
       if (r.ok) { const m = await r.json(); S.server = !!m.server; S.dataDir = m.dataDir || ''; }
     } catch { S.server = false; }
     S.backend = S.server ? 'server' : ghReady() ? 'github' : 'static';
+    if (S.backend === 'github') {
+      try {
+        const r = await fetch('https://api.github.com/user', { headers: ghHeaders(), cache: 'no-store' });
+        if (r.ok) S.ghUser = (await r.json()).login || '';
+      } catch { /* the token may not be allowed to name its owner; the manual choice still works */ }
+    }
     for (const c of COLLECTIONS) {
       let obj = null;
       if (!(S.backend === 'github' && S.ghError)) {
@@ -220,11 +226,19 @@
   const messages = () => S.data.messages || [];
   const threadOf = pid => messages().filter(m => m.personId === pid).sort((a, b) => (a.at || '').localeCompare(b.at || ''));
   const openAsks = pid => threadOf(pid).filter(m => m.question && !m.resolved);
-  function viewerId() { try { return localStorage.getItem(LS + 'viewer') || ''; } catch { return ''; } }
+  // Identity comes from the GitHub account the page is connected with, so a post cannot be
+  // signed with someone else's name. Without that (local server, no connection) it falls back
+  // to a per-browser choice.
+  const personByLogin = login => login ? people().find(p => (p.githubLogin || '').toLowerCase() === String(login).toLowerCase()) : null;
+  function viewerId() {
+    const byLogin = personByLogin(S.ghUser);
+    if (byLogin) return byLogin.id;
+    try { return localStorage.getItem(LS + 'viewer') || ''; } catch { return ''; } }
   function setViewer(id) { try { id ? localStorage.setItem(LS + 'viewer', id) : localStorage.removeItem(LS + 'viewer'); } catch { /* ignore */ } }
   const viewerName = () => person(viewerId())?.name || 'not set';
   async function chooseViewer() {
     if (!people().length) { toast('Add people first'); return; }
+    if (personByLogin(S.ghUser)) { toast(`You are signed in to GitHub as ${S.ghUser}, so posts are signed as ${viewerName()}.`); return; }
     const v = await form('Who is using this browser?', [
       { key: 'id', label: 'You are', type: 'select', options: peopleOpts(), allowEmpty: true, emptyLabel: 'not set',
         help: 'Kept on this device only, so your posts are signed.' },
@@ -560,6 +574,7 @@
       { key: 'name', label: 'Name', required: true },
       { key: 'role', label: 'Role', type: 'select', options: opt(ROLES) },
       { key: 'title', label: 'Title', help: 'e.g. Manual QA, moving to automation' },
+      { key: 'githubLogin', label: 'GitHub username', help: 'When they open the tracker with their own token, everything they post is signed as this person.' },
       { key: 'track', label: 'Learning track', type: 'select', options: opt(TRACKS), allowEmpty: true, emptyLabel: 'not set' },
       { key: 'startedOn', label: 'Started with you on', type: 'date' },
       { key: 'weeklyLearningHours', label: 'Learning hours per week', type: 'number', step: '0.5' },
@@ -934,7 +949,7 @@
     const p = person(id); if (!p) return `<div class="empty">Person not found. <a href="#/people">Back</a></div>`;
     const pa = personActs(id), ones = pa.filter(a => a.type === 'one-on-one'), others = pa.filter(a => a.type !== 'one-on-one');
     const prs = personProjects(id), enr = enrollmentsOf(id), nq = openAsks(id).length;
-    const kv = [['Role', label(p.role)], ['Title', p.title], ['Track', p.track && label(p.track)], ['Started', p.startedOn], ['Learning h/week', p.weeklyLearningHours], ['1:1 slot', p.oneOnOneSlot], ['Focus', p.focus]].filter(([, v]) => v !== undefined && v !== null && v !== '');
+    const kv = [['Role', label(p.role)], ['Title', p.title], ['GitHub', p.githubLogin], ['Track', p.track && label(p.track)], ['Started', p.startedOn], ['Learning h/week', p.weeklyLearningHours], ['1:1 slot', p.oneOnOneSlot], ['Focus', p.focus]].filter(([, v]) => v !== undefined && v !== null && v !== '');
     const tab = ['learning', 'questions'].includes(S.route.tab) ? S.route.tab : '';
     const head = `<div class="page-head"><div><h1>${esc(p.name)} ${p.active === false ? pill('grey', 'inactive') : ''}${viewerId() === id ? ' ' + pill('accent', 'you') : ''}</h1><div class="sub">${esc(p.title || label(p.role))}</div></div>
       <div class="actions"><button class="btn" data-act="log-11" data-person="${esc(id)}">Log 1:1</button><button class="btn" data-act="log-act" data-person="${esc(id)}">Log activity</button><button class="btn" data-act="enroll" data-person="${esc(id)}">Enroll in course</button><button class="btn primary" data-act="edit-person" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-person" data-id="${esc(id)}">Remove</button></div></div>
@@ -1011,7 +1026,8 @@
     const g = ghConfig();
     const sub = S.backend === 'server' ? `Server on — writing to <span class="mono">${esc(S.dataDir)}</span>` : S.backend === 'github' ? `Connected to GitHub — every save is a commit to <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span>` : 'Not connected — edits stay in this browser until you export';
     const ghCard = S.server ? '' : `<div class="card" style="margin-bottom:14px"><h3>GitHub backend</h3>
-        ${S.backend === 'github' ? `<p class="small">Reading and writing <span class="mono">data/*.json</span> in <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span> on branch <span class="mono">${esc(g.branch)}</span> with the token stored in this browser.${S.ghError ? ` <span class="pill red">last read failed: ${esc(S.ghError)}</span>` : ''}</p><div class="actions"><button class="btn" data-act="gh-connect">Change connection</button><button class="btn danger" data-act="gh-disconnect">Forget token</button></div>`
+        ${S.backend === 'github' ? `<p class="small">Reading and writing <span class="mono">data/*.json</span> in <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span> on branch <span class="mono">${esc(g.branch)}</span> with the token stored in this browser.${S.ghError ? ` <span class="pill red">last read failed: ${esc(S.ghError)}</span>` : ''}</p>
+          <p class="small">${S.ghUser ? (personByLogin(S.ghUser) ? `Signed in as <b>${esc(S.ghUser)}</b>, recognised as <b>${esc(viewerName())}</b> — everything you post is signed that way.` : `Signed in as <b>${esc(S.ghUser)}</b>, but no person on the team carries that GitHub username. Put it on their profile so their posts are signed automatically.`) : 'This token does not say who owns it, so posts are signed with the name picked in the menu.'}</p><div class="actions"><button class="btn" data-act="gh-connect">Change connection</button><button class="btn danger" data-act="gh-disconnect">Forget token</button></div>`
         : `<p class="small">This page holds no data. Connect it to the private repository that does: create a <b>fine-grained personal access token</b> on GitHub (Settings → Developer settings) scoped to that one repository with <b>Contents: read and write</b> (add <b>Actions: read and write</b> to use the Run and Refresh buttons), then paste it here. It is kept in this browser only and sent only to api.github.com.</p>
           ${storageWorks() ? '' : '<div class="banner">This browser is not keeping site data, so a connection cannot be remembered here. That is what a private window or a “block site data” setting does. Open the page in a normal window.</div>'}
           ${S.ghError ? `<div class="banner">GitHub answered: ${esc(S.ghError)}</div>` : ''}<div class="actions"><button class="btn primary" data-act="gh-connect">Connect to GitHub</button></div>`}
