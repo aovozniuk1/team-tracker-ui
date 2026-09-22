@@ -111,6 +111,7 @@
 
   async function fetchCollection(c) {
     if (S.backend === 'github') return ghGet(c);
+    if (!S.server && /\.github\.io$/.test(location.hostname)) return null; // the Pages copy ships no data
     const r = await fetch(S.server ? `/api/${c}` : `data/${c}.json`, { cache: 'no-store' });
     if (r.ok) { const obj = await r.json(); S.etags[c] = r.headers.get('ETag') || ''; S.broken.delete(c); return obj; }
     if (S.server && r.status !== 404) S.broken.add(c);
