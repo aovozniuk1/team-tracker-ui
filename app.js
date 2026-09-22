@@ -235,17 +235,27 @@
   const isLive = r => /queued|in_progress|pending|waiting|requested|running|building/i.test(r.status || '');
   const liveRuns = s => runsOf(s).filter(isLive);
   const allLive = () => ci().sources.flatMap(s => liveRuns(s).map(r => ({ s, r })));
-  const elapsed = iso => { if (!iso) return ''; const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)); return fmtDur(sec); };
+  // Durations of a run that was going at collection time are measured UP TO that collection,
+  // never up to now: the run may well have finished since, and a ticking clock would lie.
+  const snapAt = () => ci().collectedAt || '';
+  const elapsed = (iso, until) => {
+    if (!iso) return '';
+    const end = until || snapAt();
+    const endMs = end ? new Date(end).getTime() : Date.now();
+    return fmtDur(Math.max(0, Math.round((endMs - new Date(iso).getTime()) / 1000)));
+  };
+  const snapMinutes = () => { const t = snapAt(); return t ? Math.round((Date.now() - new Date(t).getTime()) / 60000) : null; };
 
   function liveBlock(s, showProject) {
     const live = liveRuns(s);
     if (!live.length) return '';
-    return `<div class="card live" style="margin-bottom:14px"><h3><span class="live-dot"></span> Running now — ${live.length} job${live.length === 1 ? '' : 's'}</h3>
+    const mins = snapMinutes(), old = mins != null && mins > 10;
+    return `<div class="card live" style="margin-bottom:14px"><h3><span class="live-dot"></span> Was running at the last check — ${live.length} job${live.length === 1 ? '' : 's'} ${pill(old ? 'red' : 'yellow', mins == null ? 'no snapshot' : mins < 2 ? 'just now' : `${mins} min ago`)}</h3>
       ${live.map(r => `<div class="row"><div class="body"><b>${esc(r.name || '')}</b> ${pill('accent', r.activeEnv || r.env || 'running')} ${pill('yellow', label((r.status || '').replace(/_/g, ' ')))}
-        ${(r.activeJobs || []).length ? `<div class="small">on now: ${(r.activeJobs || []).map(j => `<span class="mono">${esc(j.name)}</span>${j.startedAt ? ` <span class="muted">${esc(elapsed(j.startedAt))}</span>` : ''}`).join(', ')}</div>` : ''}
-        <div class="muted small">started ${esc(fmtWhen(r.startedAt))} UTC · running ${esc(elapsed(r.startedAt))}${r.trigger ? ' · ' + esc(r.trigger) : ''}${showProject ? ' · ' + esc(s.repoName || '') : ''}</div></div>
+        ${(r.activeJobs || []).length ? `<div class="small">on at the time: ${(r.activeJobs || []).map(j => `<span class="mono">${esc(j.name)}</span>${j.startedAt ? ` <span class="muted">${esc(elapsed(j.startedAt))}</span>` : ''}`).join(', ')}</div>` : ''}
+        <div class="muted small">started ${esc(fmtWhen(r.startedAt))} UTC · had been running ${esc(elapsed(r.startedAt))} when the snapshot was taken${r.trigger ? ' · ' + esc(r.trigger) : ''}${showProject ? ' · ' + esc(s.repoName || '') : ''}</div></div>
         <div class="ops">${r.url ? link(r.url, 'watch') : ''}</div></div>`).join('')}
-      <p class="hint" style="margin-top:6px">Live within the collection interval: the list refreshes itself every minute, and “Refresh now” re-reads the sources immediately.</p></div>`;
+      <p class="hint" style="margin-top:6px">${old ? `This is the picture as of ${esc(fmtWhen(snapAt()))} UTC, ${mins} minutes ago — these jobs may have finished since. Press <b>Refresh now</b> for the current state.` : 'Taken at the last collection; “Refresh now” re-reads the sources immediately.'}</p></div>`;
   }
 
   // Re-read the snapshot while a CI screen is open, so a collection that lands in the
@@ -721,7 +731,7 @@
     ].filter(([, v]) => v);
     const src = ciSource(id), lr = src ? headlineRun(src) : null, tab = S.route.tab === 'ci' ? 'ci' : '';
     const nLive = src ? liveRuns(src).length : 0;
-    const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} running</span>` : lr ? ' ' + resultPill(lr) : ''}</button></div>`;
+    const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} was running</span>` : lr ? ' ' + resultPill(lr) : ''}</button></div>`;
     const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}</div></div>
       <div class="actions"><button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button><button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button></div></div>`;
     if (tab === 'ci') return head + tabs + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
@@ -755,7 +765,7 @@
       <div class="actions" style="float:right"><button class="btn sm" data-act="refresh-ci">↻ Refresh now</button></div>
       <dl class="kv">
         <dt>Test functions</dt><dd>${t.functions != null ? `<b>${esc(String(t.functions))}</b> in ${esc(String(t.files))} files <span class="muted small">(${esc(t.method || '')}${t.commit ? ', commit ' + esc(t.commit) : ''}, counted ${esc(agoIso(t.countedAt))})</span>` : '<span class="muted">not counted yet</span>'}</dd>
-        <dt>Collected</dt><dd>${s.collectedAt ? `${esc(fmtWhen(s.collectedAt))} UTC <span class="muted">(${esc(agoIso(s.collectedAt))})</span>` : '<span class="muted">never</span>'}</dd>
+        <dt>Collected</dt><dd>${s.collectedAt ? `${esc(fmtWhen(s.collectedAt))} UTC <span class="muted">(${snapMinutes() != null && snapMinutes() < 180 ? esc(snapMinutes() + ' min ago') : esc(agoIso(s.collectedAt))})</span>${snapMinutes() > 75 ? ' ' + pill('red', 'the hourly collection is not running') : ''}` : '<span class="muted">never</span>'}</dd>
         ${s.error ? `<dt>Error</dt><dd class="small" style="color:var(--red-text)">${esc(s.error)}</dd>` : ''}
         ${s.note ? `<dt>Note</dt><dd class="small">${esc(s.note)}</dd>` : ''}
         ${(s.reports || []).length ? `<dt>Reports</dt><dd>${s.reports.map(r => link(r.url, r.name)).join(' · ')}</dd>` : ''}
@@ -810,7 +820,7 @@
     return `<div class="page-head"><div><h1>CI</h1><div class="sub">${c.collectedAt ? `snapshot from ${esc(fmtWhen(c.collectedAt))} UTC (${esc(agoIso(c.collectedAt))})` : 'nothing collected yet'} · collected hourly, or on demand</div></div>
       <div class="actions"><button class="btn primary" data-act="refresh-ci">↻ Refresh now</button></div></div>
       ${age && age.stale ? `<div class="banner">The CI snapshot is ${Math.round(age.hours)} hours old. Check the “Collect CI status” workflow in the tracker repository.</div>` : ''}
-      ${live.length ? `<div class="card live" style="margin-bottom:14px"><h3><span class="live-dot"></span> Running now</h3>${live.map(({ s, r }) => `<div class="row"><div class="body"><b>${esc(r.name || '')}</b> ${pill('accent', r.activeEnv || r.env || 'running')} ${(r.activeJobs || []).length ? `<span class="small">on now: ${(r.activeJobs || []).map(j => `<span class="mono">${esc(j.name)}</span>`).join(', ')}</span>` : ''}<div class="muted small">${esc(s.repoName || '')} · running ${esc(elapsed(r.startedAt))}</div></div><div class="ops">${r.url ? link(r.url, 'watch') : ''}</div></div>`).join('')}</div>` : ''}
+      ${live.length ? `<div class="card live" style="margin-bottom:14px"><h3><span class="live-dot"></span> Was running at the last check ${pill(snapMinutes() > 10 ? 'red' : 'yellow', snapMinutes() == null ? 'no snapshot' : `${snapMinutes()} min ago`)}</h3>${live.map(({ s, r }) => `<div class="row"><div class="body"><b>${esc(r.name || '')}</b> ${pill('accent', r.activeEnv || r.env || 'running')} ${(r.activeJobs || []).length ? `<span class="small">on at the time: ${(r.activeJobs || []).map(j => `<span class="mono">${esc(j.name)}</span>`).join(', ')}</span>` : ''}<div class="muted small">${esc(s.repoName || '')} · had been running ${esc(elapsed(r.startedAt))}</div></div><div class="ops">${r.url ? link(r.url, 'watch') : ''}</div></div>`).join('')}</div>` : ''}
       <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Repository</th><th>Test functions</th><th>Last run</th><th>Collected</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">No projects.</td></tr>'}</tbody></table></div>
       <p class="hint" style="margin-top:10px">Test functions = <span class="mono">def test_</span> in the repository's test folder at the counted commit; the last-run numbers are what CI actually executed (parametrized cases count separately).</p>`;
   }
