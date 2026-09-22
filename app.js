@@ -62,7 +62,16 @@
   // ---------- GitHub backend: data/*.json in a (private) repo, read and written with the viewer's own token
   const GH_DEFAULT = { owner: 'aovozniuk1', repo: 'team-tracker', branch: 'main', token: '' };
   function ghConfig() { try { return { ...GH_DEFAULT, ...JSON.parse(localStorage.getItem(LS + 'gh') || '{}') }; } catch { return { ...GH_DEFAULT }; } }
-  function ghStore(cfg) { try { localStorage.setItem(LS + 'gh', JSON.stringify(cfg)); } catch { toast('Could not store the connection in this browser'); } }
+  function ghStore(cfg) {
+    try {
+      localStorage.setItem(LS + 'gh', JSON.stringify(cfg));
+      return localStorage.getItem(LS + 'gh') === JSON.stringify(cfg);
+    } catch { return false; }
+  }
+  function storageWorks() {
+    try { localStorage.setItem(LS + 'probe', '1'); const ok = localStorage.getItem(LS + 'probe') === '1'; localStorage.removeItem(LS + 'probe'); return ok; }
+    catch { return false; }
+  }
   const ghReady = () => { const g = ghConfig(); return !!(g.token && g.owner && g.repo && g.branch); };
   const ghUrl = c => { const g = ghConfig(); return `https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(g.repo)}/contents/data/${c}.json`; };
   const ghHeaders = () => ({ Authorization: `Bearer ${ghConfig().token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' });
@@ -104,7 +113,11 @@
       { key: 'token', label: 'Fine-grained personal access token', type: 'password', required: true, help: 'Contents: read and write, on that one repository. Stored in this browser only; never sent anywhere but api.github.com.' },
     ], { ...g, token: '' });
     if (!v) return;
-    ghStore(v); location.reload();
+    if (!ghStore(v)) {
+      alert('This browser refused to keep the connection.\n\nThat happens in a private window, or when the browser is set to block site data. Open the page in a normal window and try again — nothing else is wrong with the token.');
+      return;
+    }
+    location.reload();
   }
   function disconnectGitHub() {
     if (!confirm('Forget the GitHub token in this browser?')) return;
@@ -898,7 +911,9 @@
     const sub = S.backend === 'server' ? `Server on — writing to <span class="mono">${esc(S.dataDir)}</span>` : S.backend === 'github' ? `Connected to GitHub — every save is a commit to <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span>` : 'Not connected — edits stay in this browser until you export';
     const ghCard = S.server ? '' : `<div class="card" style="margin-bottom:14px"><h3>GitHub backend</h3>
         ${S.backend === 'github' ? `<p class="small">Reading and writing <span class="mono">data/*.json</span> in <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span> on branch <span class="mono">${esc(g.branch)}</span> with the token stored in this browser.${S.ghError ? ` <span class="pill red">last read failed: ${esc(S.ghError)}</span>` : ''}</p><div class="actions"><button class="btn" data-act="gh-connect">Change connection</button><button class="btn danger" data-act="gh-disconnect">Forget token</button></div>`
-        : `<p class="small">This page holds no data. Connect it to the private repository that does: create a <b>fine-grained personal access token</b> on GitHub (Settings → Developer settings) scoped to that one repository with <b>Contents: read and write</b>, then paste it here. It is kept in this browser only and sent only to api.github.com.</p>${S.ghError ? `<div class="banner">GitHub answered: ${esc(S.ghError)}</div>` : ''}<div class="actions"><button class="btn primary" data-act="gh-connect">Connect to GitHub</button></div>`}
+        : `<p class="small">This page holds no data. Connect it to the private repository that does: create a <b>fine-grained personal access token</b> on GitHub (Settings → Developer settings) scoped to that one repository with <b>Contents: read and write</b> (add <b>Actions: read and write</b> to use the Run and Refresh buttons), then paste it here. It is kept in this browser only and sent only to api.github.com.</p>
+          ${storageWorks() ? '' : '<div class="banner">This browser is not keeping site data, so a connection cannot be remembered here. That is what a private window or a “block site data” setting does. Open the page in a normal window.</div>'}
+          ${S.ghError ? `<div class="banner">GitHub answered: ${esc(S.ghError)}</div>` : ''}<div class="actions"><button class="btn primary" data-act="gh-connect">Connect to GitHub</button></div>`}
       </div>`;
     return `<div class="page-head"><div><h1>Data & settings</h1><div class="sub">${sub}</div></div><div class="actions"><button class="btn primary" data-act="settings">Edit settings</button></div></div>
       ${ghCard}
