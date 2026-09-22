@@ -761,11 +761,16 @@
     if (!s) return `<div class="card"><div class="empty">No CI source is configured for this project. Add it to <span class="mono">ci-sources.json</span> in the tracker repository and run the collector.</div></div>`;
     const t = s.tests || {}, runs = runsOf(s);
     const groups = s.groups || [];
-    const head = `<div class="card" style="margin-bottom:14px"><h3>${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')} ${s.branch ? `<span class="pill">${esc(s.branch)}</span>` : ''} ${s.status === 'error' ? pill('red', 'collector error') : s.status === 'ok' ? pill('green', 'collected') : pill('grey', label(s.status || 'unknown'))}</h3>
+    const latest = groups.map(g => {
+      const r = runsOfGroup(s, g.id)[0];
+      return r ? `<span style="display:inline-block;margin:0 10px 4px 0">${resultPill(r)} <span class="small">${esc(KIND_TITLE[g.kind] || g.kind)}${g.env ? ' · ' + esc(g.env) : ''}</span> <span class="muted small">${esc(agoIso(r.startedAt))}</span></span>` : '';
+    }).join('');
+    const head = `<div class="card" style="margin-bottom:14px"><h3>Source — ${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')} ${s.branch ? `<span class="pill">${esc(s.branch)}</span>` : ''} ${s.status === 'error' ? pill('red', 'could not be read') : s.status === 'ok' ? pill('green', 'read OK') : pill('grey', label(s.status || 'unknown'))}</h3>
       <div class="actions" style="float:right"><button class="btn sm" data-act="refresh-ci">↻ Refresh now</button></div>
       <dl class="kv">
-        <dt>Test functions</dt><dd>${t.functions != null ? `<b>${esc(String(t.functions))}</b> in ${esc(String(t.files))} files <span class="muted small">(${esc(t.method || '')}${t.commit ? ', commit ' + esc(t.commit) : ''}, counted ${esc(agoIso(t.countedAt))})</span>` : '<span class="muted">not counted yet</span>'}${s.testsError ? `<div class="small" style="color:var(--yellow-text)">could not count: ${esc(s.testsError)}</div>` : ''}</dd>
-        <dt>Collected</dt><dd>${s.collectedAt ? `${esc(fmtWhen(s.collectedAt))} UTC <span class="muted">(${snapMinutes() != null && snapMinutes() < 180 ? esc(snapMinutes() + ' min ago') : esc(agoIso(s.collectedAt))})</span>${snapMinutes() > 75 ? ' ' + pill('red', 'the hourly collection is not running') : ''}` : '<span class="muted">never</span>'}</dd>
+        ${latest ? `<dt>Latest of each</dt><dd>${latest}</dd>` : ''}
+        <dt>Tests in the repository</dt><dd>${t.functions != null ? `<b>${esc(String(t.functions))}</b> in ${esc(String(t.files))} files <span class="muted small">(${esc(t.method || '')}${t.commit ? ', commit ' + esc(t.commit) : ''}, counted ${esc(agoIso(t.countedAt))})</span>` : '<span class="muted">not counted yet</span>'}${s.testsError ? `<div class="small" style="color:var(--yellow-text)">could not count: ${esc(s.testsError)}</div>` : ''}</dd>
+        <dt>Read from the source</dt><dd>${s.collectedAt ? `${esc(fmtWhen(s.collectedAt))} UTC <span class="muted">(${snapMinutes() != null && snapMinutes() < 180 ? esc(snapMinutes() + ' min ago') : esc(agoIso(s.collectedAt))})</span>${snapMinutes() > 75 ? ' ' + pill('red', 'the hourly collection is not running') : ''}` : '<span class="muted">never</span>'}</dd>
         ${s.error ? `<dt>Error</dt><dd class="small" style="color:var(--red-text)">${esc(s.error)}</dd>` : ''}
         ${s.note ? `<dt>Note</dt><dd class="small">${esc(s.note)}</dd>` : ''}
         ${(s.reports || []).length ? `<dt>Reports</dt><dd>${s.reports.map(r => link(r.url, r.name)).join(' · ')}</dd>` : ''}
@@ -813,7 +818,7 @@
         <td class="small">${s ? `${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')}${s.note ? `<div class="muted">${esc(trunc(s.note, 90))}</div>` : ''}` : '<span class="muted">no source configured</span>'}</td>
         <td>${t ? `<b>${esc(String(t.functions))}</b> <span class="muted small">in ${esc(String(t.files))} files</span>` : '<span class="muted">—</span>'}</td>
         <td style="min-width:210px">${cells || '<span class="muted">no runs</span>'}</td>
-        <td class="small">${s ? (s.status === 'error' ? `${pill('red', 'error')} <span class="muted">${esc(trunc(s.error, 70))}</span>` : esc(agoIso(s.collectedAt))) : ''}</td>
+        <td class="small">${s ? (s.status === 'error' ? `${pill('red', 'could not be read')} <span class="muted">${esc(trunc(s.error, 70))}</span>` : esc(agoIso(s.collectedAt))) : ''}</td>
         <td class="nowrap"><a class="btn sm" href="#/projects/${esc(p.id)}/ci">runs</a></td></tr>`;
     }).join('');
     const live = allLive();
