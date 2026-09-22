@@ -207,6 +207,9 @@
   const ciSource = pid => ci().sources.find(s => s.projectId === pid);
   const runsOf = s => ((s && s.runs) || []).slice().sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
   const lastRun = s => runsOf(s)[0];
+  // "Tests on deploy" fires many times a day; the headline of a project is its regression.
+  const headlineRun = s => { const rs = runsOf(s); return rs.find(r => r.kind === 'regression') || rs[0]; };
+  const failingGroups = s => (s && s.groups || []).filter(g => { const r = runsOf(s).find(x => x.group === g.id); return r && /fail|error|timed/.test(runResult(r)); });
   const runResult = r => (r.result || (r.status === 'completed' ? 'unknown' : r.status) || 'unknown').toLowerCase();
   const resultPill = r => { const res = runResult(r); const cls = /success/.test(res) ? 'green' : /fail|error|timed/.test(res) ? 'red' : /progress|queued|pending|running/.test(res) ? 'yellow' : 'grey'; return pill(cls, label(res.replace(/_/g, ' '))); };
   const KIND = { github: 'GitHub', bitbucket: 'Bitbucket', local: 'Local folder' };
@@ -215,7 +218,65 @@
   const fmtWhen = iso => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
   const agoIso = iso => iso ? ago(String(iso).slice(0, 10)) : 'never';
   const countsText = c => c ? `${c.passed ?? '?'} passed${c.failed ? `, ${c.failed} failed` : ''}${c.broken ? `, ${c.broken} broken` : ''}${c.skipped ? `, ${c.skipped} skipped` : ''} of ${c.total ?? '?'}` : '';
-  const ciAge = () => { const t = ci().collectedAt; if (!t) return null; const h = (Date.now() - new Date(t).getTime()) / 36e5; return { hours: h, stale: h > 6 }; };
+  const ciAge = () => { const t = ci().collectedAt; if (!t) return null; const h = (Date.now() - new Date(t).getTime()) / 36e5; return { hours: h, stale: h > 3 }; };
+  const isLive = r => /queued|in_progress|pending|waiting|requested|running|building/i.test(r.status || '');
+  const liveRuns = s => runsOf(s).filter(isLive);
+  const allLive = () => ci().sources.flatMap(s => liveRuns(s).map(r => ({ s, r })));
+  const elapsed = iso => { if (!iso) return ''; const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)); return fmtDur(sec); };
+
+  function liveBlock(s, showProject) {
+    const live = liveRuns(s);
+    if (!live.length) return '';
+    return `<div class="card live" style="margin-bottom:14px"><h3><span class="live-dot"></span> Running now — ${live.length} job${live.length === 1 ? '' : 's'}</h3>
+      ${live.map(r => `<div class="row"><div class="body"><b>${esc(r.name || '')}</b> ${pill('accent', r.activeEnv || r.env || 'running')} ${pill('yellow', label((r.status || '').replace(/_/g, ' ')))}
+        ${(r.activeJobs || []).length ? `<div class="small">on now: ${(r.activeJobs || []).map(j => `<span class="mono">${esc(j.name)}</span>${j.startedAt ? ` <span class="muted">${esc(elapsed(j.startedAt))}</span>` : ''}`).join(', ')}</div>` : ''}
+        <div class="muted small">started ${esc(fmtWhen(r.startedAt))} UTC · running ${esc(elapsed(r.startedAt))}${r.trigger ? ' · ' + esc(r.trigger) : ''}${showProject ? ' · ' + esc(s.repoName || '') : ''}</div></div>
+        <div class="ops">${r.url ? link(r.url, 'watch') : ''}</div></div>`).join('')}
+      <p class="hint" style="margin-top:6px">Live within the collection interval: the list refreshes itself every minute, and “Refresh now” re-reads the sources immediately.</p></div>`;
+  }
+
+  // Re-read the snapshot while a CI screen is open, so a collection that lands in the
+  // background shows up without the person reloading the page.
+  let ciTimer = null;
+  function stopCiAuto() { if (ciTimer) { clearInterval(ciTimer); ciTimer = null; } }
+  function startCiAuto() {
+    if (ciTimer) return;
+    ciTimer = setInterval(async () => {
+      if (!/^#\/(ci|projects\/[^/]+\/ci)/.test(location.hash)) return stopCiAuto();
+      const before = ci().collectedAt;
+      try {
+        const fresh = await fetchCollection('ci');
+        if (fresh && fresh.collectedAt !== before) { S.data.ci = normalize('ci', fresh); render(); }
+        else if (allLive().length) render();
+      } catch { /* keep what is on screen */ }
+    }, 60000);
+  }
+
+  async function refreshCI(btn) {
+    if (S.backend !== 'github') { toast('Connect this page to GitHub first (Data → Connect to GitHub)'); return; }
+    const cfg = ghConfig(), before = ci().collectedAt;
+    if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
+    try {
+      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/actions/workflows/collect-ci.yml/dispatches`, {
+        method: 'POST', headers: { ...ghHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: cfg.branch }),
+      });
+      if (r.status !== 204) {
+        const err = await ghError(r);
+        toast(r.status === 403 || r.status === 404 ? `Cannot refresh from here (${err}). Add “Actions: read and write” to this token.` : 'Refresh failed: ' + err);
+        return;
+      }
+      toast('Collecting…');
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 5000));
+        try {
+          const fresh = await fetchCollection('ci');
+          if (fresh && fresh.collectedAt && fresh.collectedAt !== before) { S.data.ci = normalize('ci', fresh); toast('Updated'); render(); return; }
+        } catch { /* keep polling */ }
+      }
+      toast('The collector is still running; the page will pick it up on its own.');
+    } catch { toast('Could not reach GitHub'); }
+    finally { if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = '↻ Refresh now'; } }
+  }
   const progressOf = (pid, lid) => learning().progress[`${pid}|${lid}`] || { status: 'not-started' };
   const enrollmentsOf = pid => learning().enrollments.filter(e => e.personId === pid);
 
@@ -248,9 +309,14 @@
     }
     for (const p of projects()) {
       if (p.status !== 'active') continue;
-      const s = ciSource(p.id), r = s ? lastRun(s) : null;
-      if (r && /fail|error|timed/.test(runResult(r))) out.push({ lvl: 'red', text: `${p.name}: last CI run failed — ${r.name} (${agoIso(r.startedAt)})`, href: `#/projects/${p.id}/ci` });
-      if (s && s.status === 'error') out.push({ lvl: 'yellow', text: `${p.name}: CI collector cannot read ${s.repoName || 'the source'} — ${trunc(s.error, 80)}`, href: `#/ci` });
+      const s = ciSource(p.id);
+      if (!s) continue;
+      const bad = failingGroups(s);
+      const reg = bad.filter(g => g.kind === 'regression').map(g => g.env || g.title);
+      const rest = bad.filter(g => g.kind !== 'regression').map(g => `${KIND_TITLE[g.kind] || g.kind} ${g.env || ''}`.trim());
+      if (reg.length) out.push({ lvl: 'red', text: `${p.name}: regression failing on ${reg.join(', ')}`, href: `#/projects/${p.id}/ci` });
+      if (rest.length) out.push({ lvl: 'yellow', text: `${p.name}: failing ${rest.join('; ')}`, href: `#/projects/${p.id}/ci` });
+      if (s.status === 'error') out.push({ lvl: 'yellow', text: `${p.name}: CI collector cannot read ${s.repoName || 'the source'} — ${trunc(s.error, 80)}`, href: `#/ci` });
     }
     const age = ciAge();
     if (age && age.stale) out.push({ lvl: 'yellow', text: `CI snapshot is ${Math.round(age.hours)} hours old`, href: '#/ci' });
@@ -513,6 +579,26 @@
     await save('learning'); render();
   }
 
+  // Starting a run goes through the tracker's own "Run tests" workflow, which holds the
+  // project credentials server-side; this browser only ever talks to the tracker repository.
+  async function runCI(projectId, groupId) {
+    const s = ciSource(projectId), g = (s && (s.groups || []).find(x => x.id === groupId)) || null;
+    if (!g) return;
+    if (S.backend !== 'github') { toast('Connect this page to GitHub first (Data → Connect to GitHub)'); return; }
+    if (!confirm(`Start “${g.title}” on ${s.repoName}?\n\nThis runs the real suite against that environment.`)) return;
+    const cfg = ghConfig();
+    try {
+      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/actions/workflows/run-tests.yml/dispatches`, {
+        method: 'POST', headers: { ...ghHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ref: cfg.branch, inputs: { project: projectId, target: g.dispatchTarget || g.workflowFile } }),
+      });
+      if (r.status === 204) { toast('Run requested. It shows up here after the next collection.'); return; }
+      const err = await ghError(r);
+      if (r.status === 403 || r.status === 404) { toast(`Cannot start it from here (${err}). Add “Actions: read and write” to this token, or open it on GitHub.`); return; }
+      toast('Could not start the run: ' + err);
+    } catch { toast('Could not reach GitHub'); }
+  }
+
   async function editSettings() {
     const v = await form('Settings', [
       { key: 'teamName', label: 'Team name' },
@@ -589,7 +675,7 @@
     const bl = openBlockers().filter(b => b.projectId === p.id).length;
     const ms = p.nextMilestone?.text ? `<div class="small"><span class="muted">Next:</span> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` <span class="${p.nextMilestone.due < today() ? 'pill red' : 'muted'}">${esc(p.nextMilestone.due)}</span>` : ''}</div>` : '';
     const wsA = (p.workstreams || []).filter(w => w.status === 'active').length;
-    const s = ciSource(p.id), r = s ? lastRun(s) : null;
+    const s = ciSource(p.id), r = s ? headlineRun(s) : null;
     const ciLine = s ? `<div class="small" style="margin-top:6px">${s.tests ? `<b>${esc(String(s.tests.functions))}</b> tests` : '<span class="muted">tests not counted</span>'}${r ? ` · ${resultPill(r)} <span class="muted">${esc(r.name || '')}, ${esc(agoIso(r.startedAt))}</span>` : ' · <span class="muted">no CI runs</span>'}</div>` : '';
     return `<div class="card clickable" data-href="#/projects/${esc(p.id)}"><h3>${dot(p.health)} <a href="#/projects/${esc(p.id)}">${esc(p.name)}</a> ${pill(p.status)}</h3>
       <div class="meta">Lead: ${p.leadId ? esc(pname(p.leadId)) : '<i>unassigned</i>'}${p.code ? ` · ${esc(p.code)}` : ''}${wsA ? ` · ${wsA} active workstream${wsA === 1 ? '' : 's'}` : ''}${bl ? ` · <span class="pill blocker">${bl} blocker${bl === 1 ? '' : 's'}</span>` : ''}</div>
@@ -620,11 +706,12 @@
       ['Local docs', (p.localDocs || []).map(d => `<span class="mono small">${esc(d.path)}</span> <span class="muted small">— ${esc(d.what)}</span>`).join('<br>')],
       ['Updated', esc(p.updatedOn)],
     ].filter(([, v]) => v);
-    const src = ciSource(id), lr = src ? lastRun(src) : null, tab = S.route.tab === 'ci' ? 'ci' : '';
-    const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${lr ? ' ' + resultPill(lr) : ''}</button></div>`;
+    const src = ciSource(id), lr = src ? headlineRun(src) : null, tab = S.route.tab === 'ci' ? 'ci' : '';
+    const nLive = src ? liveRuns(src).length : 0;
+    const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} running</span>` : lr ? ' ' + resultPill(lr) : ''}</button></div>`;
     const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}</div></div>
       <div class="actions"><button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button><button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button></div></div>`;
-    if (tab === 'ci') return head + tabs + vProjectCI(p);
+    if (tab === 'ci') return head + tabs + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
     return head + tabs + `${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}
       <div class="grid cols-2">
         <div class="card"><h3>Overview</h3><p>${esc(p.summary || '')}</p><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>${p.notes ? `<h3 style="margin-top:12px">Notes</h3><p class="small" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}</div>
@@ -643,11 +730,16 @@
         <div class="card">${pa.length ? pa.map(a => actRow(a, { showProject: false })).join('') : '<div class="empty">Nothing logged for this project yet.</div>'}</div></div>`;
   }
 
+  const KIND_TITLE = { regression: 'Regression', load: 'Load test', suite: 'Targeted suite', deploy: 'On every deploy', other: 'Other' };
+  const runsOfGroup = (s, gid) => runsOf(s).filter(r => r.group === gid);
+
   function vProjectCI(p) {
     const s = ciSource(p.id);
     if (!s) return `<div class="card"><div class="empty">No CI source is configured for this project. Add it to <span class="mono">ci-sources.json</span> in the tracker repository and run the collector.</div></div>`;
     const t = s.tests || {}, runs = runsOf(s);
+    const groups = s.groups || [];
     const head = `<div class="card" style="margin-bottom:14px"><h3>${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')} ${s.branch ? `<span class="pill">${esc(s.branch)}</span>` : ''} ${s.status === 'error' ? pill('red', 'collector error') : s.status === 'ok' ? pill('green', 'collected') : pill('grey', label(s.status || 'unknown'))}</h3>
+      <div class="actions" style="float:right"><button class="btn sm" data-act="refresh-ci">↻ Refresh now</button></div>
       <dl class="kv">
         <dt>Test functions</dt><dd>${t.functions != null ? `<b>${esc(String(t.functions))}</b> in ${esc(String(t.files))} files <span class="muted small">(${esc(t.method || '')}${t.commit ? ', commit ' + esc(t.commit) : ''}, counted ${esc(agoIso(t.countedAt))})</span>` : '<span class="muted">not counted yet</span>'}</dd>
         <dt>Collected</dt><dd>${s.collectedAt ? `${esc(fmtWhen(s.collectedAt))} UTC <span class="muted">(${esc(agoIso(s.collectedAt))})</span>` : '<span class="muted">never</span>'}</dd>
@@ -656,29 +748,56 @@
         ${(s.reports || []).length ? `<dt>Reports</dt><dd>${s.reports.map(r => link(r.url, r.name)).join(' · ')}</dd>` : ''}
         ${(s.downloads || []).length ? `<dt>Downloads</dt><dd>${s.downloads.map(d => `${link(d.url, d.name)} <span class="muted small">${d.size ? Math.round(d.size / 1024) + ' KB' : ''}${d.createdAt ? ' · ' + esc(fmtWhen(d.createdAt)) : ''}</span>`).join('<br>')}</dd>` : ''}
       </dl></div>`;
-    const rows = runs.map(r => `<tr><td class="nowrap small">${esc(fmtWhen(r.startedAt))}<div class="muted">${esc(agoIso(r.startedAt))}</div></td>
+    const runRow = r => `<tr><td class="nowrap small">${esc(fmtWhen(r.startedAt))}<div class="muted">${esc(agoIso(r.startedAt))}</div></td>
       <td><b>${esc(r.name || '')}</b>${r.title && r.title !== r.name ? `<div class="muted small">${esc(trunc(r.title, 90))}</div>` : ''}${r.number ? `<div class="muted small">#${esc(String(r.number))}</div>` : ''}</td>
       <td class="small">${esc(r.trigger || '')}${r.branch ? `<div class="muted">${esc(r.branch)}</div>` : ''}</td><td>${resultPill(r)}</td>
       <td class="small">${r.counts ? esc(countsText(r.counts)) : '<span class="muted">—</span>'}</td><td class="small nowrap">${esc(fmtDur(r.durationSec))}</td>
-      <td class="small">${r.url ? link(r.url, 'run') : ''}${(r.reports || []).map(x => ' · ' + link(x.url, x.name)).join('')}</td></tr>`).join('');
-    const table = runs.length ? `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>When (UTC)</th><th>Job</th><th>Trigger</th><th>Result</th><th>Tests</th><th>Duration</th><th>Open</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <p class="hint" style="margin-top:8px">Allure links open the report in a new tab (save it from there). Test counts appear where the source records them per run.</p>` : '<div class="card"><div class="empty">No runs collected for this source yet.</div></div>';
-    return head + table;
+      <td class="small">${r.url ? link(r.url, 'run') : ''}${(r.reports || []).map(x => ' · ' + link(x.url, x.name)).join('')}</td></tr>`;
+
+    // one block per kind (regression / load / suite / deploy), one row per environment
+    const kinds = [...new Set(groups.map(g => g.kind))];
+    const blocks = kinds.map(kind => {
+      const rows = groups.filter(g => g.kind === kind).map(g => {
+        const gr = runsOfGroup(s, g.id), last = gr[0];
+        const allure = last ? (last.reports || []).map(x => link(x.url, 'Allure')).join(' ') : '';
+        const groupAllure = allure || (gr.find(r => (r.reports || []).length) ? `<span class="muted small">last with a report: ${link(gr.find(r => (r.reports || []).length).reports[0].url, esc(fmtWhen(gr.find(r => (r.reports || []).length).startedAt)))}</span>` : '<span class="muted">—</span>');
+        const history = gr.slice(1, 6).map(r => `<span title="${esc(fmtWhen(r.startedAt))} — ${esc(runResult(r))}">${/success/.test(runResult(r)) ? '●' : /fail|error|timed/.test(runResult(r)) ? '✕' : '·'}</span>`).join(' ');
+        return `<tr><td><b>${esc(g.env || g.title)}</b><div class="muted small">${esc(g.workflowFile || '')}</div></td>
+          <td>${last ? `${resultPill(last)}<div class="muted small">${esc(fmtWhen(last.startedAt))} · ${esc(agoIso(last.startedAt))}</div>` : '<span class="muted">never run</span>'}</td>
+          <td class="small">${last && last.counts ? esc(countsText(last.counts)) : '<span class="muted">—</span>'}</td>
+          <td class="small nowrap">${last ? esc(fmtDur(last.durationSec)) : ''}</td>
+          <td class="small nowrap mono" title="the five runs before it">${history}</td>
+          <td class="small">${groupAllure}</td>
+          <td class="nowrap"><button class="btn sm primary" data-act="run-ci" data-project="${esc(p.id)}" data-group="${esc(g.id)}" title="Start this run now">▶ Run</button>${g.workflowUrl ? ' ' + link(g.workflowUrl, 'on ' + (s.kind === 'github' ? 'GitHub' : 'Bitbucket')) : ''}</td></tr>`;
+      }).join('');
+      return `<div class="section"><div class="section-head"><h3>${esc(KIND_TITLE[kind] || label(kind))}</h3></div>
+        <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Environment</th><th>Last run</th><th>Tests</th><th>Duration</th><th>Before that</th><th>Report</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    }).join('');
+
+    const flat = runs.length ? `<details><summary class="small" style="cursor:pointer;color:var(--accent);padding:8px 0">All ${runs.length} collected runs</summary>
+      <div class="card tbl-wrap" style="margin-top:8px"><table class="tbl"><thead><tr><th>When (UTC)</th><th>Job</th><th>Trigger</th><th>Result</th><th>Tests</th><th>Duration</th><th>Open</th></tr></thead><tbody>${runs.map(runRow).join('')}</tbody></table></div></details>` : '';
+    const empty = !groups.length ? `<div class="card"><div class="empty">${s.status === 'error' ? 'The collector could not read this source, so there is nothing to group yet.' : 'No jobs matched the classification rules for this source.'}</div></div>` : '';
+    return head + blocks + empty + flat +
+      `<p class="hint" style="margin-top:10px">Allure opens in a new tab; save it from there. “Run” starts the job through the tracker's own workflow, so the token in this browser never needs access to the project's repository. A started run appears here after the next collection.</p>`;
   }
 
   function vCI() {
     const c = ci(), age = ciAge();
     const rows = projects().filter(p => p.status !== 'done').map(p => {
-      const s = ciSource(p.id), r = s ? lastRun(s) : null, t = s && s.tests;
+      const s = ciSource(p.id), t = s && s.tests;
+      const cells = s ? (s.groups || []).map(g => { const r = runsOf(s).find(x => x.group === g.id); return r ? `<div class="small" style="margin:2px 0">${resultPill(r)} <span class="muted">${esc(KIND_TITLE[g.kind] || g.kind)} ${esc(g.env || '')} · ${esc(agoIso(r.startedAt))}</span></div>` : ''; }).join('') : '';
       return `<tr><td>${prlink(p.id)}<div class="muted small">${esc(p.code || '')}</div></td>
         <td class="small">${s ? `${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')}${s.note ? `<div class="muted">${esc(trunc(s.note, 90))}</div>` : ''}` : '<span class="muted">no source configured</span>'}</td>
         <td>${t ? `<b>${esc(String(t.functions))}</b> <span class="muted small">in ${esc(String(t.files))} files</span>` : '<span class="muted">—</span>'}</td>
-        <td>${r ? `${resultPill(r)} <span class="small">${esc(r.name || '')}</span><div class="muted small">${esc(agoIso(r.startedAt))}${r.counts ? ' · ' + esc(countsText(r.counts)) : ''}</div>` : '<span class="muted">no runs</span>'}</td>
+        <td style="min-width:210px">${cells || '<span class="muted">no runs</span>'}</td>
         <td class="small">${s ? (s.status === 'error' ? `${pill('red', 'error')} <span class="muted">${esc(trunc(s.error, 70))}</span>` : esc(agoIso(s.collectedAt))) : ''}</td>
         <td class="nowrap"><a class="btn sm" href="#/projects/${esc(p.id)}/ci">runs</a></td></tr>`;
     }).join('');
-    return `<div class="page-head"><div><h1>CI</h1><div class="sub">${c.collectedAt ? `snapshot from ${esc(fmtWhen(c.collectedAt))} UTC (${esc(agoIso(c.collectedAt))})` : 'nothing collected yet'} · refreshed every 2 h by the “Collect CI status” workflow or by <span class="mono">python tools/collect_ci.py</span></div></div></div>
+    const live = allLive();
+    return `<div class="page-head"><div><h1>CI</h1><div class="sub">${c.collectedAt ? `snapshot from ${esc(fmtWhen(c.collectedAt))} UTC (${esc(agoIso(c.collectedAt))})` : 'nothing collected yet'} · collected hourly, or on demand</div></div>
+      <div class="actions"><button class="btn primary" data-act="refresh-ci">↻ Refresh now</button></div></div>
       ${age && age.stale ? `<div class="banner">The CI snapshot is ${Math.round(age.hours)} hours old. Check the “Collect CI status” workflow in the tracker repository.</div>` : ''}
+      ${live.length ? `<div class="card live" style="margin-bottom:14px"><h3><span class="live-dot"></span> Running now</h3>${live.map(({ s, r }) => `<div class="row"><div class="body"><b>${esc(r.name || '')}</b> ${pill('accent', r.activeEnv || r.env || 'running')} ${(r.activeJobs || []).length ? `<span class="small">on now: ${(r.activeJobs || []).map(j => `<span class="mono">${esc(j.name)}</span>`).join(', ')}</span>` : ''}<div class="muted small">${esc(s.repoName || '')} · running ${esc(elapsed(r.startedAt))}</div></div><div class="ops">${r.url ? link(r.url, 'watch') : ''}</div></div>`).join('')}</div>` : ''}
       <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Repository</th><th>Test functions</th><th>Last run</th><th>Collected</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">No projects.</td></tr>'}</tbody></table></div>
       <p class="hint" style="margin-top:10px">Test functions = <span class="mono">def test_</span> in the repository's test folder at the counted commit; the last-run numbers are what CI actually executed (parametrized cases count separately).</p>`;
   }
@@ -802,8 +921,14 @@
       lines.push(`${p.name} — ${p.status}, health ${p.health}${p.healthReason ? ': ' + p.healthReason : ''}`);
       lines.push(`  lead: ${p.leadId ? pname(p.leadId) : 'unassigned'}${(p.memberIds || []).length ? '; also ' + p.memberIds.map(pname).join(', ') : ''}`);
       if (p.nextMilestone?.text) lines.push(`  next: ${p.nextMilestone.text}${p.nextMilestone.due ? ' (due ' + p.nextMilestone.due + ')' : ''}`);
-      const src = ciSource(p.id), lr = src ? lastRun(src) : null;
-      if (src) lines.push(`  tests: ${src.tests ? src.tests.functions + ' functions' : 'not counted'}; last CI run: ${lr ? `${runResult(lr)} — ${lr.name} (${agoIso(lr.startedAt)})${lr.counts ? ', ' + countsText(lr.counts) : ''}` : 'none'}${src.status === 'error' ? '; collector error: ' + src.error : ''}`);
+      const src = ciSource(p.id);
+      if (src) {
+        lines.push(`  tests: ${src.tests ? src.tests.functions + ' functions' : 'not counted'}${src.status === 'error' ? '; collector error: ' + src.error : ''}`);
+        for (const g of (src.groups || [])) {
+          const r = runsOf(src).find(x => x.group === g.id);
+          if (r) lines.push(`    ${(KIND_TITLE[g.kind] || g.kind)} ${g.env || ''}: ${runResult(r)} (${agoIso(r.startedAt)})${r.counts ? ', ' + countsText(r.counts) : ''}`);
+        }
+      }
       for (const w of (p.workstreams || []).filter(w => w.status === 'active')) lines.push(`  • ${w.name}${w.ownerId ? ' — ' + pname(w.ownerId) : ''}${w.next ? ': ' + w.next : ''}`);
       for (const b of bl) lines.push(`  BLOCKER: ${b.text}`);
       if (la) lines.push(`  last update ${la.date}: ${trunc(la.text, 160)}`);
@@ -844,7 +969,7 @@
   const NAV = [['dashboard', 'Dashboard', '⌂'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['activity', 'Activity', '≡'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
   function renderNav() {
     $('#nav').innerHTML = `<div class="brand">Team Tracker<small>${esc(settings().teamName || '')}</small></div>` +
-      NAV.map(([k, l, i]) => `<a class="item ${S.route.name === k ? 'active' : ''}" href="#/${k === 'dashboard' ? '' : k}"><span class="ico">${i}</span>${l}</a>`).join('') +
+      NAV.map(([k, l, i]) => `<a class="item ${S.route.name === k ? 'active' : ''}" href="#/${k === 'dashboard' ? '' : k}"><span class="ico">${i}</span>${l}${k === 'ci' && allLive().length ? ' <span class="live-dot"></span>' : ''}</a>`).join('') +
       `<div class="spacer"></div><div class="status"><span class="dot ${S.backend === 'static' ? '' : 'on'}"></span>${S.backend === 'server' ? 'saving to data/' : S.backend === 'github' ? `GitHub · ${esc(ghConfig().owner)}/${esc(ghConfig().repo)}` : 'browser-only mode'}</div>`;
   }
   function parseRoute() {
@@ -867,6 +992,7 @@
     const notice = S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
     bind(v);
+    if (r.name === 'ci' || (r.name === 'projects' && r.tab === 'ci')) startCiAuto(); else stopCiAuto();
     if (sameView) {
       openPhases.forEach(k => { const d = $$('details[data-phase]', v).find(x => x.dataset.phase === k); if (d) d.open = true; });
       window.scrollTo(0, y);
@@ -922,6 +1048,8 @@
       case 'edit-lesson': return editLesson(d.person, d.lesson, d.title);
       case 'settings': return editSettings();
       case 'summary': return showSummary();
+      case 'run-ci': return runCI(d.project, d.group);
+      case 'refresh-ci': return refreshCI(b);
       case 'gh-connect': return connectGitHub();
       case 'gh-disconnect': return disconnectGitHub();
       case 'export': return exportAll();
