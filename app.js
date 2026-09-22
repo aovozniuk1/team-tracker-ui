@@ -789,17 +789,23 @@
         const gr = runsOfGroup(s, g.id), last = gr[0];
         const allure = last ? (last.reports || []).map(x => link(x.url, 'Allure')).join(' ') : '';
         const groupAllure = allure || (gr.find(r => (r.reports || []).length) ? `<span class="muted small">last with a report: ${link(gr.find(r => (r.reports || []).length).reports[0].url, esc(fmtWhen(gr.find(r => (r.reports || []).length).startedAt)))}</span>` : '<span class="muted">—</span>');
-        const history = gr.slice(1, 6).map(r => `<span title="${esc(fmtWhen(r.startedAt))} — ${esc(runResult(r))}">${/success/.test(runResult(r)) ? '●' : /fail|error|timed/.test(runResult(r)) ? '✕' : '·'}</span>`).join(' ');
+        const history = gr.slice(1, 6).map(r => {
+          const res = runResult(r), mark = /success/.test(res) ? '●' : /fail|error|timed/.test(res) ? '✕' : '·';
+          const cls = /success/.test(res) ? 'var(--green-text)' : /fail|error|timed/.test(res) ? 'var(--red-text)' : 'var(--muted)';
+          return `<span style="display:inline-block;text-align:center;margin-right:7px" title="${esc(fmtWhen(r.startedAt))} UTC — ${esc(res)}${r.counts ? ', ' + esc(countsText(r.counts)) : ''}">
+            <span class="mono" style="color:${cls}">${mark}</span><br><span class="muted" style="font-size:.7rem">${esc((r.startedAt || '').slice(5, 10))}</span></span>`;
+        }).join('');
         return `<tr><td><b>${esc(g.env || g.title)}</b><div class="muted small">${esc(g.workflowFile || '')}</div></td>
-          <td>${last ? `${resultPill(last)}<div class="muted small">${esc(fmtWhen(last.startedAt))} · ${esc(agoIso(last.startedAt))}</div>` : '<span class="muted">never run</span>'}</td>
+          <td class="small nowrap">${last ? `${esc(fmtWhen(last.startedAt))}<div class="muted">${esc(agoIso(last.startedAt))}</div>` : '<span class="muted">never run</span>'}</td>
+          <td>${last ? resultPill(last) : ''}</td>
           <td class="small">${last && last.counts ? esc(countsText(last.counts)) : '<span class="muted">—</span>'}</td>
           <td class="small nowrap">${last ? esc(fmtDur(last.durationSec)) : ''}</td>
-          <td class="small nowrap mono" title="the five runs before it">${history}</td>
+          <td class="small nowrap">${history || '<span class="muted">—</span>'}</td>
           <td class="small">${groupAllure}</td>
           <td class="nowrap"><button class="btn sm primary" data-act="run-ci" data-project="${esc(p.id)}" data-group="${esc(g.id)}" title="Start this run now">▶ Run</button>${g.workflowUrl ? ' ' + link(g.workflowUrl, 'on ' + (s.kind === 'github' ? 'GitHub' : 'Bitbucket')) : ''}</td></tr>`;
       }).join('');
       return `<div class="section"><div class="section-head"><h3>${esc(KIND_TITLE[kind] || label(kind))}</h3></div>
-        <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Environment</th><th>Last run</th><th>Tests</th><th>Duration</th><th>Before that</th><th>Report</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+        <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Environment</th><th>Last run (UTC)</th><th>Result</th><th>Tests</th><th>Duration</th><th>Runs before it</th><th>Report</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }).join('');
 
     const flat = runs.length ? `<details><summary class="small" style="cursor:pointer;color:var(--accent);padding:8px 0">All ${runs.length} collected runs</summary>
