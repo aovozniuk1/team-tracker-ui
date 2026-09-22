@@ -791,7 +791,7 @@
     const ciLine = s ? `<div class="small" style="margin-top:6px">${s.tests ? `<b>${esc(String(s.tests.functions))}</b> tests` : '<span class="muted">tests not counted</span>'}${r ? ` · ${resultPill(r)} <span class="muted">${esc(r.name || '')}, ${esc(agoIso(r.startedAt))}</span>` : ' · <span class="muted">no CI runs</span>'}</div>` : '';
     return `<div class="card clickable" data-href="#/projects/${esc(p.id)}"><h3>${dot(p.health)} <a href="#/projects/${esc(p.id)}">${esc(p.name)}</a> ${pill(p.status)}</h3>
       <div class="meta">Lead: ${p.leadId ? esc(pname(p.leadId)) : '<i>unassigned</i>'}${p.code ? ` · ${esc(p.code)}` : ''}${wsA ? ` · ${wsA} active workstream${wsA === 1 ? '' : 's'}` : ''}${bl ? ` · <span class="pill blocker">${bl} blocker${bl === 1 ? '' : 's'}</span>` : ''}</div>
-      <p class="small" style="margin-top:6px">${esc(trunc(p.healthReason || p.summary, 140))}</p>${ms}${ciLine}
+      <p class="small" style="margin-top:6px">${esc(trunc(p.healthReason || p.summary, 140))}</p>${s && s.verdict ? `<div class="small"><b>${esc(s.verdict)}</b></div>` : ''}${ms}${ciLine}
       <div class="muted small">${la ? `${esc(trunc(la.text, 90))} — ${esc(ago(la.date))}` : 'no activity logged'}</div></div>`;
   }
 
@@ -821,7 +821,9 @@
     const src = ciSource(id), lr = src ? headlineRun(src) : null, tab = S.route.tab === 'ci' ? 'ci' : '';
     const nLive = src ? liveRuns(src).length : 0;
     const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} was running</span>` : lr ? ' ' + resultPill(lr) : ''}</button></div>`;
-    const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}</div></div>
+    const verdict = src && src.verdict ? `<div class="sub" style="margin-top:4px"><b>${esc(src.verdict)}</b> <span class="muted">kept current by the collector</span></div>` : '';
+    const written = p.updatedOn ? `<span class="muted"> · description written ${esc(ago(p.updatedOn))}, by hand</span>` : '';
+    const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}${written}</div>${verdict}</div>
       <div class="actions"><button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button><button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button></div></div>`;
     if (tab === 'ci') return head + tabs + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
     return head + tabs + `${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}
