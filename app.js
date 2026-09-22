@@ -2,6 +2,9 @@
   'use strict';
 
   const COLLECTIONS = ['settings', 'people', 'projects', 'activities', 'curriculum', 'learning', 'ci', 'messages'];
+  // The log is the lead's own record. It lives in a separate repository nobody else is on, so a
+  // team member's token cannot reach it by going around this page.
+  const PRIVATE = new Set(['activities']);
   const LS = 'team-tracker:';
   const S = { data: {}, server: false, dataDir: '', localOverride: false, route: { name: 'dashboard', id: null, tab: null } };
 
@@ -42,6 +45,12 @@
   const parseLines = s => String(s || '').split('\n').map(x => x.trim()).filter(Boolean);
   const parseRecords = (s, cols) => parseLines(s).map(line => { const parts = line.split('|').map(x => x.trim()); const o = {}; cols.forEach((c, i) => { o[c] = i === cols.length - 1 ? parts.slice(i).join(' | ') : (parts[i] || ''); }); return o; });
   const recordsToLines = (arr, cols) => (arr || []).map(o => cols.map(c => o[c] || '').join(' | ').replace(/( \| )+$/, '')).join('\n');
+  // The form shows a few columns of each record; anything else it holds (an environment's status
+  // and the day it was checked) is carried over from the record of the same name, not dropped.
+  const keepUnshown = (next, prev, cols) => (next || []).map(r => {
+    const was = (prev || []).find(x => String(x[cols[0]] || '') === String(r[cols[0]] || ''));
+    return was ? { ...was, ...r } : r;
+  });
 
   let toastTimer;
   function toast(msg) {
@@ -61,7 +70,7 @@
   }
 
   // ---------- GitHub backend: data/*.json in a (private) repo, read and written with the viewer's own token
-  const GH_DEFAULT = { owner: 'aovozniuk1', repo: 'team-tracker', branch: 'main', token: '' };
+  const GH_DEFAULT = { owner: 'aovozniuk1', repo: 'team-tracker', branch: 'main', token: '', privateRepo: 'team-tracker-private' };
   function ghConfig() { try { return { ...GH_DEFAULT, ...JSON.parse(localStorage.getItem(LS + 'gh') || '{}') }; } catch { return { ...GH_DEFAULT }; } }
   function ghStore(cfg) {
     try {
@@ -74,7 +83,11 @@
     catch { return false; }
   }
   const ghReady = () => { const g = ghConfig(); return !!(g.token && g.owner && g.repo && g.branch); };
-  const ghUrl = c => { const g = ghConfig(); return `https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(g.repo)}/contents/data/${c}.json`; };
+  const ghUrl = c => {
+    const g = ghConfig();
+    const repo = PRIVATE.has(c) ? (g.privateRepo || '') : g.repo;
+    return `https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(repo)}/contents/data/${c}.json`;
+  };
   const ghHeaders = () => ({ Authorization: `Bearer ${ghConfig().token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' });
   const b64encode = s => { const bytes = new TextEncoder().encode(s); let bin = ''; for (const b of bytes) bin += String.fromCharCode(b); return btoa(bin); };
   const b64decode = b => new TextDecoder().decode(Uint8Array.from(atob(b.replace(/\s/g, '')), ch => ch.charCodeAt(0)));
@@ -109,7 +122,8 @@
     const g = ghConfig();
     const v = await form('Connect to GitHub', [
       { key: 'owner', label: 'Repository owner', required: true },
-      { key: 'repo', label: 'Repository', required: true, help: 'the private repo that holds data/*.json' },
+      { key: 'repo', label: 'Repository', required: true, help: 'the repository that holds data/*.json' },
+      { key: 'privateRepo', label: 'Log repository', help: 'The lead\u2019s own repository, holding the activity log. Leave it as it is: a token without access to it simply sees no log.' },
       { key: 'branch', label: 'Branch', required: true },
       { key: 'token', label: 'Fine-grained personal access token', type: 'password', required: true, help: 'Contents: read and write, on that one repository. Stored in this browser only; never sent anywhere but api.github.com.' },
     ], { ...g, token: '' });
@@ -147,10 +161,21 @@
         if (r.ok) S.ghUser = (await r.json()).login || '';
       } catch { /* the token may not be allowed to name its owner; the manual choice still works */ }
     }
+    S.privateOk = S.server ? true : null;
     for (const c of COLLECTIONS) {
       let obj = null;
-      if (!(S.backend === 'github' && S.ghError)) {
-        try { obj = await fetchCollection(c); } catch (e) { if (S.server) S.broken.add(c); if (S.backend === 'github') S.ghError = e.message; }
+      const priv = PRIVATE.has(c) && S.backend === 'github';
+      if (!(S.backend === 'github' && S.ghError && !priv)) {
+        try {
+          obj = await fetchCollection(c);
+          if (priv) S.privateOk = obj !== null;
+        } catch (e) {
+          if (S.server) S.broken.add(c);
+          // A token that cannot reach the lead's repository is not a broken connection. It belongs
+          // to a team member, and for them the log does not exist at all.
+          if (priv) S.privateOk = false;
+          else if (S.backend === 'github') S.ghError = e.message;
+        }
       }
       if (S.backend === 'static') {
         try { const ls = localStorage.getItem(LS + c); if (ls) { obj = JSON.parse(ls); S.localOverride = true; } } catch { /* ignore */ }
@@ -160,6 +185,7 @@
   }
 
   async function save(c) {
+    if (PRIVATE.has(c) && !canSeeHistory()) return false;
     const obj = S.data[c];
     if (S.backend === 'github') {
       if (S.ghError) { toast('Not saved: GitHub could not be read (' + S.ghError + ')'); return false; }
@@ -194,7 +220,10 @@
   const settings = () => S.data.settings;
   const people = () => S.data.people;
   const projects = () => S.data.projects;
-  const acts = () => S.data.activities;
+  // One gate for the whole log: with no access to it every view built on it comes out empty,
+  // instead of each one having to remember to ask.
+  const canSeeHistory = () => S.backend === 'server' || S.privateOk === true;
+  const acts = () => canSeeHistory() ? S.data.activities : [];
   const courses = () => S.data.curriculum.courses;
   const learning = () => S.data.learning;
   const person = id => people().find(p => p.id === id);
@@ -404,10 +433,12 @@
       else if (p.health === 'yellow') out.push({ lvl: 'yellow', text: `${p.name}: health yellow — ${p.healthReason || 'no reason recorded'}`, href: `#/projects/${p.id}` });
       const due = p.nextMilestone?.due;
       if (due && due < t) out.push({ lvl: 'red', text: `${p.name}: milestone overdue since ${due} — ${p.nextMilestone.text}`, href: `#/projects/${p.id}` });
-      const la = projectActs(p.id)[0];
-      const n = la ? daysSince(la.date) : null;
-      if (n == null) out.push({ lvl: 'grey', text: `${p.name}: no activity logged yet`, href: `#/projects/${p.id}` });
-      else if (n > (st.staleProjectDays || 7)) out.push({ lvl: 'yellow', text: `${p.name}: no update for ${n} days`, href: `#/projects/${p.id}` });
+      if (canSeeHistory()) {
+        const la = projectActs(p.id)[0];
+        const n = la ? daysSince(la.date) : null;
+        if (n == null) out.push({ lvl: 'grey', text: `${p.name}: no activity logged yet`, href: `#/projects/${p.id}` });
+        else if (n > (st.staleProjectDays || 7)) out.push({ lvl: 'yellow', text: `${p.name}: no update for ${n} days`, href: `#/projects/${p.id}` });
+      }
     }
     for (const p of projects()) {
       if (p.status !== 'active') continue;
@@ -430,9 +461,11 @@
       if (q.length) out.push({ lvl: 'yellow', text: `${p.name}: ${q.length} open question${q.length === 1 ? '' : 's'}, oldest ${ago((q[0].at || '').slice(0, 10))}`, href: `#/people/${p.id}/questions` });
     }
     for (const m of mentees()) {
-      const o = lastOneOnOne(m.id);
-      if (!o) out.push({ lvl: 'grey', text: `${m.name}: no 1:1 logged yet`, href: `#/people/${m.id}` });
-      else if (daysSince(o.date) > (st.oneOnOneCadenceDays || 7)) out.push({ lvl: 'yellow', text: `${m.name}: last 1:1 ${ago(o.date)}`, href: `#/people/${m.id}` });
+      if (canSeeHistory()) {
+        const o = lastOneOnOne(m.id);
+        if (!o) out.push({ lvl: 'grey', text: `${m.name}: no 1:1 logged yet`, href: `#/people/${m.id}` });
+        else if (daysSince(o.date) > (st.oneOnOneCadenceDays || 7)) out.push({ lvl: 'yellow', text: `${m.name}: last 1:1 ${ago(o.date)}`, href: `#/people/${m.id}` });
+      }
       for (const e of enrollmentsOf(m.id)) {
         const cs = courseSummary(m.id, e.courseId); if (!cs) continue;
         const stuck = lessonsOf(cs.course).filter(l => progressOf(m.id, l.id).status === 'stuck');
@@ -548,7 +581,10 @@
       nextMilestone: { text: v.milestoneText, due: v.milestoneDue },
       stack: v.stackText.split(',').map(s => s.trim()).filter(Boolean),
       aliases: v.aliasesText.split(',').map(s => s.trim()).filter(Boolean),
-      repos: v.repos, environments: v.environments, systems: v.systems, localDocs: v.localDocs,
+      repos: keepUnshown(v.repos, p.repos, ['name']),
+      environments: keepUnshown(v.environments, p.environments, ['name']),
+      systems: keepUnshown(v.systems, p.systems, ['name']),
+      localDocs: keepUnshown(v.localDocs, p.localDocs, ['path']),
       keyFacts: v.keyFacts, risks: v.risks, openQuestions: v.openQuestions, nextSteps: v.nextSteps, notes: v.notes,
       updatedOn: today(),
     };
@@ -602,10 +638,8 @@
       { key: 'track', label: 'Learning track', type: 'select', options: opt(TRACKS), allowEmpty: true, emptyLabel: 'not set' },
       { key: 'startedOn', label: 'Started with you on', type: 'date' },
       { key: 'weeklyLearningHours', label: 'Learning hours per week', type: 'number', step: '0.5' },
-      { key: 'oneOnOneSlot', label: '1:1 slot', help: 'e.g. Tue 15:00' },
       { key: 'focus', label: 'Current focus', help: 'What they are on right now, one line. Shows on the dashboard.' },
       { key: 'active', label: 'Active', type: 'checkbox', text: 'Currently on the team' },
-      { key: 'notes', label: 'Notes', type: 'textarea' },
     ], { active: true, ...p });
     if (!v) return;
     const np = { ...p, ...v, id: p.id || slug(v.name), updatedOn: today() };
@@ -713,8 +747,6 @@
     const v = await form('Settings', [
       { key: 'teamName', label: 'Team name' },
       { key: 'leadName', label: 'Your name' },
-      { key: 'oneOnOneCadenceDays', label: '1:1 cadence (days)', type: 'number' },
-      { key: 'staleProjectDays', label: 'Project counts as stale after (days)', type: 'number' },
       { key: 'staleLearningDays', label: 'Learning counts as stale after (days)', type: 'number' },
       { key: 'autoCollectAfterHours', label: 'Collect CI on open when the snapshot is older than (hours)', type: 'number',
         help: 'Opening the page then starts a collection itself, so the data does not depend on the scheduled job alone.' },
@@ -726,6 +758,8 @@
   // ---------- view helpers
   const pill = (cls, text) => `<span class="pill ${esc(cls)}">${esc(text ?? label(cls))}</span>`;
   const dot = h => `<span class="dot ${esc(h)}" title="${esc(h)}"></span>`;
+  const envPill = e => e.status ? pill({ up: 'green', degraded: 'yellow', down: 'red' }[e.status] || 'grey',
+    e.status + (e.checkedOn ? ` · ${e.checkedOn}` : '')) : '';
   const progressBar = cs => {
     const t = cs.total || 1;
     return `<div class="progress" title="${cs.counts.done} done, ${cs.counts['gate-passed']} gates, ${cs.counts['in-progress']} in progress, ${cs.counts.stuck} stuck of ${cs.total}">
@@ -752,33 +786,34 @@
     const pcts = mentees().flatMap(m => enrollmentsOf(m.id).map(e => courseSummary(m.id, e.courseId)?.pct ?? 0));
     const avg = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
     const reds = att.filter(a => a.lvl === 'red').length;
+    const hist = canSeeHistory();
     const recent = acts().slice().sort(byDateDesc).slice(0, 12);
     const attRow = a => `<div class="row"><div class="lvl ${a.lvl}"></div><div class="body"><a href="${esc(a.href)}">${esc(a.text)}</a></div></div>`;
     return `<div class="page-head"><div><h1>${esc(st.teamName || 'Team')}</h1><div class="sub">${esc(today())} · ${act.length} active project${act.length === 1 ? '' : 's'} · ${mentees().length} mentee${mentees().length === 1 ? '' : 's'}</div></div>
-      <div class="actions"><button class="btn" data-act="summary">Status summary</button><button class="btn" data-act="log-11">Log 1:1</button><button class="btn" data-act="log-blocker">Log blocker</button><button class="btn primary" data-act="log-act">Log activity</button></div></div>
+      <div class="actions"><button class="btn" data-act="summary">Status summary</button>${hist ? `<button class="btn" data-act="log-11">Log 1:1</button><button class="btn" data-act="log-blocker">Log blocker</button><button class="btn primary" data-act="log-act">Log activity</button>` : ''}</div></div>
       <div class="kpis">
         <div class="kpi"><div class="v">${act.length}</div><div class="l">active projects</div></div>
         <div class="kpi ${reds ? 'bad' : 'good'}"><div class="v">${reds}</div><div class="l">red flags</div></div>
-        <div class="kpi ${openBlockers().length ? 'bad' : 'good'}"><div class="v">${openBlockers().length}</div><div class="l">open blockers</div></div>
-        <div class="kpi ${overdue11.length ? 'warn' : 'good'}"><div class="v">${overdue11.length}</div><div class="l">1:1s due</div></div>
+        ${hist ? `<div class="kpi ${openBlockers().length ? 'bad' : 'good'}"><div class="v">${openBlockers().length}</div><div class="l">open blockers</div></div>
+        <div class="kpi ${overdue11.length ? 'warn' : 'good'}"><div class="v">${overdue11.length}</div><div class="l">1:1s due</div></div>` : ''}
         <div class="kpi"><div class="v">${avg == null ? '—' : avg + '%'}</div><div class="l">avg learning progress</div></div>
       </div>
-      <div class="grid cols-2">
+      <div class="grid ${hist ? 'cols-2' : ''}">
         <div class="section"><div class="section-head"><h2>Needs attention</h2><span class="hint">${att.length} item${att.length === 1 ? '' : 's'}</span></div>
           <div class="card attention">${att.length ? att.slice(0, 10).map(attRow).join('') + (att.length > 10 ? `<details class="more"><summary class="small">show ${att.length - 10} more</summary>${att.slice(10).map(attRow).join('')}</details>` : '') : '<div class="empty">All quiet. Nothing overdue, no blockers, no red health.</div>'}</div></div>
-        <div class="section"><div class="section-head"><h2>Recent activity</h2><a href="#/activity" class="small">all →</a></div>
-          <div class="card">${recent.length ? recent.map(a => actRow(a)).join('') : '<div class="empty">Nothing logged yet. Use “Log activity”.</div>'}</div></div>
+        ${hist ? `<div class="section"><div class="section-head"><h2>Recent activity</h2><a href="#/activity" class="small">all →</a></div>
+          <div class="card">${recent.length ? recent.map(a => actRow(a)).join('') : '<div class="empty">Nothing logged yet. Use “Log activity”.</div>'}</div></div>` : ''}
       </div>
       <div class="section"><div class="section-head"><h2>Projects</h2><a href="#/projects" class="small">manage →</a></div>
         <div class="grid auto">${projects().filter(p => p.status !== 'done').map(projectCard).join('') || '<div class="empty">No projects yet.</div>'}</div></div>
       <div class="section"><div class="section-head"><h2>People — right now</h2><a href="#/people" class="small">manage →</a></div>
-        <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Person</th><th>Focus</th><th>Projects</th><th>Last activity</th><th>Last 1:1</th><th>Learning</th></tr></thead><tbody>
+        <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Person</th><th>Focus</th><th>Projects</th>${hist ? '<th>Last activity</th><th>Last 1:1</th>' : ''}<th>Learning</th></tr></thead><tbody>
         ${activePeople().sort((a, b) => (a.role === 'mentee' ? 0 : 1) - (b.role === 'mentee' ? 0 : 1)).map(p => {
           const la = personActs(p.id)[0], o = lastOneOnOne(p.id);
           const prs = personProjects(p.id).map(pr => `${prlink(pr.id)} <span class="muted small">(${esc(personRoleIn(pr, p.id))})</span>`).join('<br>') || '<span class="muted">—</span>';
           const lr = enrollmentsOf(p.id).map(e => courseSummary(p.id, e.courseId)).filter(Boolean).map(cs => `<div class="small"><b>${cs.pct}%</b> ${esc(cs.course.name)}${cs.current ? ` · <span class="muted">now: ${esc(cs.current.title)}</span>` : ' · <span class="muted">complete</span>'}</div>${progressBar(cs)}`).join('') || '<span class="muted">—</span>';
-          return `<tr><td>${plink(p.id)}<div class="muted small">${esc(p.title || label(p.role))}</div></td><td>${esc(p.focus || '—')}</td><td>${prs}</td><td>${la ? `<div class="small">${esc(trunc(la.text, 80))}</div><span class="muted small">${esc(ago(la.date))}</span>` : '<span class="muted">—</span>'}</td><td>${o ? `<span title="${esc(o.date)}">${esc(ago(o.date))}</span>` : '<span class="muted">never</span>'}</td><td style="min-width:180px">${lr}</td></tr>`;
-        }).join('') || '<tr><td colspan="6" class="empty">No people yet — add your mentees in People.</td></tr>'}
+          return `<tr><td>${plink(p.id)}<div class="muted small">${esc(p.title || label(p.role))}</div></td><td>${esc(p.focus || '—')}</td><td>${prs}</td>${hist ? `<td>${la ? `<div class="small">${esc(trunc(la.text, 80))}</div><span class="muted small">${esc(ago(la.date))}</span>` : '<span class="muted">—</span>'}</td><td>${o ? `<span title="${esc(o.date)}">${esc(ago(o.date))}</span>` : '<span class="muted">never</span>'}</td>` : ''}<td style="min-width:180px">${lr}</td></tr>`;
+        }).join('') || '<tr><td colspan="${hist ? 6 : 4}" class="empty">No people yet — add your mentees in People.</td></tr>'}
         </tbody></table></div></div>`;
   }
 
@@ -792,7 +827,7 @@
     return `<div class="card clickable" data-href="#/projects/${esc(p.id)}"><h3>${dot(p.health)} <a href="#/projects/${esc(p.id)}">${esc(p.name)}</a> ${pill(p.status)}</h3>
       <div class="meta">Lead: ${p.leadId ? esc(pname(p.leadId)) : '<i>unassigned</i>'}${p.code ? ` · ${esc(p.code)}` : ''}${wsA ? ` · ${wsA} active workstream${wsA === 1 ? '' : 's'}` : ''}${bl ? ` · <span class="pill blocker">${bl} blocker${bl === 1 ? '' : 's'}</span>` : ''}</div>
       <p class="small" style="margin-top:6px">${esc(trunc(p.healthReason || p.summary, 140))}</p>${s && s.verdict ? `<div class="small"><b>${esc(s.verdict)}</b></div>` : ''}${ms}${ciLine}
-      <div class="muted small">${la ? `${esc(trunc(la.text, 90))} — ${esc(ago(la.date))}` : 'no activity logged'}</div></div>`;
+      ${canSeeHistory() ? `<div class="muted small">${la ? `${esc(trunc(la.text, 90))} — ${esc(ago(la.date))}` : 'no activity logged'}</div>` : ''}</div>`;
   }
 
   function vProjects() {
@@ -800,8 +835,8 @@
     const list = projects().filter(p => !f || p.status === f);
     return `<div class="page-head"><div><h1>Projects</h1><div class="sub">${projects().length} total</div></div><div class="actions"><button class="btn primary" data-act="new-project">New project</button></div></div>
       <div class="filters"><select data-filter="status"><option value="">all statuses</option>${STATUS.map(s => `<option value="${s}"${f === s ? ' selected' : ''}>${label(s)}</option>`).join('')}</select></div>
-      <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Status</th><th>Health</th><th>Lead</th><th>Team</th><th>Next milestone</th><th>Last activity</th></tr></thead><tbody>
-      ${list.map(p => { const la = projectActs(p.id)[0]; return `<tr><td>${prlink(p.id)}<div class="muted small">${esc(p.code || '')}${p.client ? ' · ' + esc(p.client) : ''}</div></td><td>${pill(p.status)}</td><td>${dot(p.health)} <span class="small">${esc(trunc(p.healthReason, 60))}</span></td><td>${p.leadId ? plink(p.leadId) : '<span class="muted">—</span>'}</td><td class="small">${(p.memberIds || []).map(pname).map(esc).join(', ') || '<span class="muted">—</span>'}</td><td class="small">${p.nextMilestone?.text ? esc(p.nextMilestone.text) + (p.nextMilestone.due ? ` <span class="${p.nextMilestone.due < today() ? 'pill red' : 'muted'}">${esc(p.nextMilestone.due)}</span>` : '') : '<span class="muted">—</span>'}</td><td class="small">${la ? esc(ago(la.date)) : '<span class="muted">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">No projects match.</td></tr>'}
+      <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Status</th><th>Health</th><th>Lead</th><th>Team</th><th>Next milestone</th>${canSeeHistory() ? '<th>Last activity</th>' : ''}</tr></thead><tbody>
+      ${list.map(p => { const la = projectActs(p.id)[0]; return `<tr><td>${prlink(p.id)}<div class="muted small">${esc(p.code || '')}${p.client ? ' · ' + esc(p.client) : ''}</div></td><td>${pill(p.status)}</td><td>${dot(p.health)} <span class="small">${esc(trunc(p.healthReason, 60))}</span></td><td>${p.leadId ? plink(p.leadId) : '<span class="muted">—</span>'}</td><td class="small">${(p.memberIds || []).map(pname).map(esc).join(', ') || '<span class="muted">—</span>'}</td><td class="small">${p.nextMilestone?.text ? esc(p.nextMilestone.text) + (p.nextMilestone.due ? ` <span class="${p.nextMilestone.due < today() ? 'pill red' : 'muted'}">${esc(p.nextMilestone.due)}</span>` : '') : '<span class="muted">—</span>'}</td>${canSeeHistory() ? `<td class="small">${la ? esc(ago(la.date)) : '<span class="muted">—</span>'}</td>` : ''}</tr>`; }).join('') || `<tr><td colspan="${canSeeHistory() ? 7 : 6}" class="empty">No projects match.</td></tr>`}
       </tbody></table></div>`;
   }
 
@@ -813,7 +848,7 @@
       ['Members', (p.memberIds || []).map(plink).join(', ')],
       ['Started', esc(p.startedOn)], ['Stack', (p.stack || []).map(esc).join(', ')], ['Aliases', (p.aliases || []).map(esc).join(', ')],
       ['Repositories', (p.repos || []).map(r => `${link(r.url, r.name)}${r.branch ? ` <span class="muted small">(${esc(r.branch)})</span>` : ''}${r.localPath ? `<div class="mono muted small">${esc(r.localPath)}</div>` : ''}`).join('<br>')],
-      ['Environments', (p.environments || []).map(e => `${link(e.url, e.name)}${e.notes ? ` <span class="muted small">— ${esc(e.notes)}</span>` : ''}`).join('<br>')],
+      ['Environments', (p.environments || []).map(e => `${link(e.url, e.name)} ${envPill(e)}${e.notes ? ` <span class="muted small">— ${esc(e.notes)}</span>` : ''}`).join('<br>')],
       ['Systems', (p.systems || []).map(s => `${link(s.url, s.name)}${s.role ? ` <span class="muted small">— ${esc(s.role)}</span>` : ''}`).join('<br>')],
       ['Local docs', (p.localDocs || []).map(d => `<span class="mono small">${esc(d.path)}</span> <span class="muted small">— ${esc(d.what)}</span>`).join('<br>')],
       ['Updated', esc(p.updatedOn)],
@@ -822,9 +857,14 @@
     const nLive = src ? liveRuns(src).length : 0;
     const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} was running</span>` : lr ? ' ' + resultPill(lr) : ''}</button></div>`;
     const verdict = src && src.verdict ? `<div class="sub" style="margin-top:4px"><b>${esc(src.verdict)}</b> <span class="muted">kept current by the collector</span></div>` : '';
-    const written = p.updatedOn ? `<span class="muted"> · description written ${esc(ago(p.updatedOn))}, by hand</span>` : '';
+    const seen = (p.checkedAgainst || []).filter(Boolean);
+    const written = p.updatedOn
+      ? `<span class="muted" title="${esc(seen.join(' · '))}"> · description ${seen.length
+          ? `rebuilt from ${seen.length} live source${seen.length > 1 ? 's' : ''}`
+          : 'written by hand'} ${esc(ago(p.updatedOn))}</span>`
+      : '';
     const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}${written}</div>${verdict}</div>
-      <div class="actions"><button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button><button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button></div></div>`;
+      <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button>` : ''}<button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button></div></div>`;
     if (tab === 'ci') return head + tabs + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
     return head + tabs + `${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}
       <div class="grid cols-2">
@@ -840,8 +880,8 @@
         <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Workstream</th><th>Status</th><th>Owner</th><th>Summary</th><th>Next</th><th></th></tr></thead><tbody>
         ${(p.workstreams || []).map(w => `<tr><td><b>${esc(w.name)}</b></td><td>${pill(w.status)}</td><td>${w.ownerId ? plink(w.ownerId) : '<span class="muted">—</span>'}</td><td class="small">${esc(w.summary || '')}</td><td class="small">${esc(w.next || '')}</td><td class="nowrap"><button class="btn sm" data-act="edit-ws" data-project="${esc(id)}" data-id="${esc(w.id)}">✎</button> <button class="btn sm" data-act="del-ws" data-project="${esc(id)}" data-id="${esc(w.id)}">🗑</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">No workstreams yet.</td></tr>'}
         </tbody></table></div></div>
-      <div class="section"><div class="section-head"><h2>Activity${bl.length ? ` · <span class="pill blocker">${bl.length} open blocker${bl.length === 1 ? '' : 's'}</span>` : ''}</h2></div>
-        <div class="card">${pa.length ? pa.map(a => actRow(a, { showProject: false })).join('') : '<div class="empty">Nothing logged for this project yet.</div>'}</div></div>`;
+      ${canSeeHistory() ? `<div class="section"><div class="section-head"><h2>Activity${bl.length ? ` · <span class="pill blocker">${bl.length} open blocker${bl.length === 1 ? '' : 's'}</span>` : ''}</h2></div>
+        <div class="card">${pa.length ? pa.map(a => actRow(a, { showProject: false })).join('') : '<div class="empty">Nothing logged for this project yet.</div>'}</div></div>` : ''}`;
   }
 
   const KIND_TITLE = { regression: 'Regression', load: 'Load test', suite: 'Targeted suite', deploy: 'On every deploy', other: 'Other' };
@@ -941,7 +981,7 @@
           <div class="meta">${esc(p.title || '')}${p.startedOn ? ` · since ${esc(p.startedOn)}` : ''}</div>
           ${p.focus ? `<p class="small" style="margin-top:6px"><span class="muted">Focus:</span> ${esc(p.focus)}</p>` : ''}
           <div class="small"><span class="muted">Projects:</span> ${prs.map(x => esc(x.name)).join(', ') || '—'}</div>
-          <div class="small"><span class="muted">Last 1:1:</span> ${o ? esc(ago(o.date)) : 'never'}${openAsks(p.id).length ? ' · ' + pill('yellow', openAsks(p.id).length + ' open') : ''}</div>
+          <div class="small">${canSeeHistory() ? `<span class="muted">Last 1:1:</span> ${o ? esc(ago(o.date)) : 'never'}${openAsks(p.id).length ? ' · ' : ''}` : ''}${openAsks(p.id).length ? pill('yellow', openAsks(p.id).length + ' open') : ''}</div>
           ${lr.map(cs => `<div class="small" style="margin-top:6px"><b>${cs.pct}%</b> ${esc(cs.course.name)}${cs.current ? ` · <span class="muted">${esc(cs.current.title)}</span>` : ''}</div>${progressBar(cs)}`).join('')}
         </div>`;
       }).join('') || '<div class="empty">No people yet.</div>'}</div>`;
@@ -983,10 +1023,10 @@
     const p = person(id); if (!p) return `<div class="empty">Person not found. <a href="#/people">Back</a></div>`;
     const pa = personActs(id), ones = pa.filter(a => a.type === 'one-on-one'), others = pa.filter(a => a.type !== 'one-on-one');
     const prs = personProjects(id), enr = enrollmentsOf(id), nq = openAsks(id).length;
-    const kv = [['Role', label(p.role)], ['Title', p.title], ['GitHub', p.githubLogin], ['Track', p.track && label(p.track)], ['Started', p.startedOn], ['Learning h/week', p.weeklyLearningHours], ['1:1 slot', p.oneOnOneSlot], ['Focus', p.focus]].filter(([, v]) => v !== undefined && v !== null && v !== '');
+    const kv = [['Role', label(p.role)], ['Title', p.title], ['GitHub', p.githubLogin], ['Track', p.track && label(p.track)], ['Started', p.startedOn], ['Learning h/week', p.weeklyLearningHours], ['Focus', p.focus]].filter(([, v]) => v !== undefined && v !== null && v !== '');
     const tab = ['learning', 'questions'].includes(S.route.tab) ? S.route.tab : '';
     const head = `<div class="page-head"><div><h1>${esc(p.name)} ${p.active === false ? pill('grey', 'inactive') : ''}${viewerId() === id ? ' ' + pill('accent', 'you') : ''}</h1><div class="sub">${esc(p.title || label(p.role))}</div></div>
-      <div class="actions"><button class="btn" data-act="log-11" data-person="${esc(id)}">Log 1:1</button><button class="btn" data-act="log-act" data-person="${esc(id)}">Log activity</button><button class="btn" data-act="enroll" data-person="${esc(id)}">Enroll in course</button><button class="btn primary" data-act="edit-person" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-person" data-id="${esc(id)}">Remove</button></div></div>
+      <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-11" data-person="${esc(id)}">Log 1:1</button><button class="btn" data-act="log-act" data-person="${esc(id)}">Log activity</button>` : ''}<button class="btn" data-act="enroll" data-person="${esc(id)}">Enroll in course</button><button class="btn primary" data-act="edit-person" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-person" data-id="${esc(id)}">Remove</button></div></div>
       <div class="tabs">
         <button class="${tab ? '' : 'active'}" data-href="#/people/${esc(id)}">Profile</button>
         <button class="${tab === 'learning' ? 'active' : ''}" data-href="#/people/${esc(id)}/learning">Learning${enr.length ? ` <span class="pill">${enr.length}</span>` : ''}</button>
@@ -998,12 +1038,12 @@
 
     const summary = enr.map(e => { const cs = courseSummary(id, e.courseId); return cs ? `<div class="small" style="margin-top:8px"><b>${cs.pct}%</b> ${esc(cs.course.name)}${cs.current ? ` \u00b7 <span class="muted">now on ${esc(cs.current.title)}</span>` : ' \u00b7 <span class="muted">complete</span>'}</div>${progressBar(cs)}` : ''; }).join('');
     return head + `<div class="grid cols-2">
-        <div><div class="card" style="margin-bottom:14px"><h3>Profile</h3><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>${p.notes ? `<p class="small" style="white-space:pre-wrap;margin-top:10px">${esc(p.notes)}</p>` : ''}</div>
+        <div><div class="card" style="margin-bottom:14px"><h3>Profile</h3><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div>
           <div class="card" style="margin-bottom:14px"><h3>Projects</h3>${prs.length ? `<ul class="plain">${prs.map(pr => `<li>${prlink(pr.id)} <span class="muted small">\u2014 ${esc(personRoleIn(pr, id))}</span> ${dot(pr.health)} ${pill(pr.status)}</li>`).join('')}</ul>` : '<div class="empty">Not assigned to any project. Set them as lead or member in the project.</div>'}</div>
-          <div class="card"><div class="section-head"><h3>1:1 journal</h3><span class="hint">${ones.length} entries</span></div>${ones.length ? ones.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">No 1:1 logged yet.</div>'}</div></div>
+          ${canSeeHistory() ? `<div class="card"><div class="section-head"><h3>1:1 journal</h3><span class="hint">${ones.length} entries</span></div>${ones.length ? ones.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">No 1:1 logged yet.</div>'}</div>` : ''}</div>
         <div><div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Learning</h3><a class="btn sm" href="#/people/${esc(id)}/learning">open</a></div>${summary || '<div class="empty">Not enrolled in any course.</div>'}</div>
           <div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Questions</h3><a class="btn sm" href="#/people/${esc(id)}/questions">open</a></div>${nq ? openAsks(id).slice(0, 3).map(m => `<div class="row"><div class="body"><div class="txt small">${esc(trunc(m.text, 120))}</div><div class="muted small">${esc(pname(m.authorId))} \u00b7 ${esc(fmtWhen(m.at))}</div></div></div>`).join('') : `<div class="empty">${threadOf(id).length ? 'No open questions.' : 'Nothing asked yet.'}</div>`}</div>
-          <div class="card"><div class="section-head"><h3>Other activity</h3></div>${others.length ? others.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">Nothing logged.</div>'}</div></div>
+          ${canSeeHistory() ? `<div class="card"><div class="section-head"><h3>Other activity</h3></div>${others.length ? others.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">Nothing logged.</div>'}</div>` : ''}</div>
       </div>`;
   }
 
@@ -1055,12 +1095,13 @@
 
   function vData() {
     const st = settings();
-    const counts = COLLECTIONS.map(c => { const d = S.data[c]; const n = Array.isArray(d) ? d.length : c === 'curriculum' ? d.courses.length + ' courses' : c === 'learning' ? `${d.enrollments.length} enrollments, ${Object.keys(d.progress).length} marks` : '—'; return `<tr><td class="mono">${c}.json</td><td>${esc(String(n))}</td></tr>`; }).join('');
+    const counts = COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => { const d = S.data[c]; const n = Array.isArray(d) ? d.length : c === 'curriculum' ? d.courses.length + ' courses' : c === 'learning' ? `${d.enrollments.length} enrollments, ${Object.keys(d.progress).length} marks` : '—'; return `<tr><td class="mono">${c}.json</td><td>${esc(String(n))}</td></tr>`; }).join('');
     const theme = localStorage.getItem(LS + 'theme') || 'auto';
     const g = ghConfig();
     const sub = S.backend === 'server' ? `Server on — writing to <span class="mono">${esc(S.dataDir)}</span>` : S.backend === 'github' ? `Connected to GitHub — every save is a commit to <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span>` : 'Not connected — edits stay in this browser until you export';
     const ghCard = S.server ? '' : `<div class="card" style="margin-bottom:14px"><h3>GitHub backend</h3>
         ${S.backend === 'github' ? `<p class="small">Reading and writing <span class="mono">data/*.json</span> in <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span> on branch <span class="mono">${esc(g.branch)}</span> with the token stored in this browser.${S.ghError ? ` <span class="pill red">last read failed: ${esc(S.ghError)}</span>` : ''}</p>
+          <p class="small">${S.privateOk ? `The activity log is being read from <span class="mono">${esc(g.owner)}/${esc(g.privateRepo)}</span>.` : 'This token reaches no activity log, so none is shown. That is the normal state for everyone but the lead.'}</p>
           <p class="small">${S.ghUser ? (personByLogin(S.ghUser) ? `Signed in as <b>${esc(S.ghUser)}</b>, recognised as <b>${esc(viewerName())}</b> — everything you post is signed that way.` : `Signed in as <b>${esc(S.ghUser)}</b>, but no person on the team carries that GitHub username. Put it on their profile so their posts are signed automatically.`) : 'This token does not say who owns it, so posts are signed with the name picked in the menu.'}</p><div class="actions"><button class="btn" data-act="gh-connect">Change connection</button><button class="btn danger" data-act="gh-disconnect">Forget token</button></div>`
         : `<p class="small">This page holds no data. Connect it to the private repository that does: create a <b>fine-grained personal access token</b> on GitHub (Settings → Developer settings) scoped to that one repository with <b>Contents: read and write</b> (add <b>Actions: read and write</b> to use the Run and Refresh buttons), then paste it here. It is kept in this browser only and sent only to api.github.com.</p>
           ${storageWorks() ? '' : '<div class="banner">This browser is not keeping site data, so a connection cannot be remembered here. That is what a private window or a “block site data” setting does. Open the page in a normal window.</div>'}
@@ -1072,9 +1113,9 @@
         <div class="card"><h3>Storage</h3><table class="tbl"><thead><tr><th>Collection</th><th>Contents</th></tr></thead><tbody>${counts}</tbody></table>
           <div class="actions" style="margin-top:12px"><button class="btn" data-act="export">Export all (JSON)</button><label class="btn">Import JSON <input type="file" accept="application/json" data-act="import" hidden></label>${S.localOverride ? '<button class="btn danger" data-act="clear-local">Discard browser-only edits</button>' : ''}</div>
           <p class="hint" style="margin-top:8px">Import replaces the collections present in the file. Through the local server a backup of each file is kept as <span class="mono">*.json.bak</span>; through GitHub every save is a commit, so history is in git.</p></div>
-        <div class="card"><h3>Settings</h3><dl class="kv"><dt>Team</dt><dd>${esc(st.teamName)}</dd><dt>Lead</dt><dd>${esc(st.leadName || '—')}</dd><dt>1:1 cadence</dt><dd>${esc(st.oneOnOneCadenceDays)} days</dd><dt>Stale project</dt><dd>${esc(st.staleProjectDays)} days without update</dd><dt>Stale learning</dt><dd>${esc(st.staleLearningDays)} days without a mark</dd></dl>
+        <div class="card"><h3>Settings</h3><dl class="kv"><dt>Team</dt><dd>${esc(st.teamName)}</dd><dt>Lead</dt><dd>${esc(st.leadName || '—')}</dd><dt>Stale learning</dt><dd>${esc(st.staleLearningDays)} days without a mark</dd></dl>
           <h3 style="margin-top:14px">Theme</h3><div class="actions">${['auto', 'light', 'dark'].map(t => `<button class="btn sm ${theme === t ? 'primary' : ''}" data-theme-set="${t}">${label(t)}</button>`).join('')}</div>
-          <h3 style="margin-top:14px">How this works</h3><ul class="plain small"><li><b>Projects</b> hold status, health, lead, workstreams, milestones and facts.</li><li><b>People</b> are your mentees; each project's lead is one of them.</li><li><b>Activity</b> is the log: updates, blockers, decisions, 1:1s. It feeds “needs attention”.</li><li><b>Learning</b> tracks each person per lesson across the courses you handed out; gates are the checkpoints.</li><li>Everything is plain JSON in <span class="mono">data/</span>, versioned in git. Commit when you want a snapshot.</li></ul></div>
+          <h3 style="margin-top:14px">How this works</h3><ul class="plain small"><li><b>Projects</b> hold status, health, lead, workstreams, milestones and facts.</li><li><b>People</b> are your mentees; each project's lead is one of them.</li>${canSeeHistory() ? '<li><b>Activity</b> is the log: updates, blockers, decisions, 1:1s. It feeds “needs attention”.</li>' : ''}<li><b>Learning</b> tracks each person per lesson across the courses you handed out; gates are the checkpoints.</li><li>Everything is plain JSON in <span class="mono">data/</span>, versioned in git. Commit when you want a snapshot.</li></ul></div>
       </div>`;
   }
 
@@ -1096,8 +1137,10 @@
         }
       }
       for (const w of (p.workstreams || []).filter(w => w.status === 'active')) lines.push(`  • ${w.name}${w.ownerId ? ' — ' + pname(w.ownerId) : ''}${w.next ? ': ' + w.next : ''}`);
-      for (const b of bl) lines.push(`  BLOCKER: ${b.text}`);
-      if (la) lines.push(`  last update ${la.date}: ${trunc(la.text, 160)}`);
+      if (canSeeHistory()) {
+        for (const b of bl) lines.push(`  BLOCKER: ${b.text}`);
+        if (la) lines.push(`  last update ${la.date}: ${trunc(la.text, 160)}`);
+      }
       lines.push('');
     }
     if (mentees().length) {
@@ -1107,7 +1150,7 @@
         const lr = enrollmentsOf(m.id).map(e => courseSummary(m.id, e.courseId)).filter(Boolean).map(cs => `${cs.course.name}: ${cs.pct}%${cs.current ? ', now on ' + cs.current.title : ''}`).join('; ');
         lines.push(`${m.name}${m.focus ? ' — ' + m.focus : ''}`);
         lines.push(`  projects: ${personProjects(m.id).map(pr => pr.name + ' (' + personRoleIn(pr, m.id) + ')').join(', ') || '—'}`);
-        lines.push(`  last 1:1: ${o ? o.date : 'never'}${lr ? '; learning: ' + lr : ''}`);
+        lines.push(canSeeHistory() ? `  last 1:1: ${o ? o.date : 'never'}${lr ? '; learning: ' + lr : ''}` : `  learning: ${lr || '—'}`);
         lines.push('');
       }
     }
@@ -1135,7 +1178,7 @@
   const NAV = [['dashboard', 'Dashboard', '⌂'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['activity', 'Activity', '≡'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
   function renderNav() {
     $('#nav').innerHTML = `<div class="brand">Team Tracker<small>${esc(settings().teamName || '')}</small></div>` +
-      NAV.map(([k, l, i]) => `<a class="item ${S.route.name === k ? 'active' : ''}" href="#/${k === 'dashboard' ? '' : k}"><span class="ico">${i}</span>${l}${k === 'ci' && allLive().length ? ' <span class="live-dot"></span>' : ''}</a>`).join('') +
+      NAV.filter(([k]) => k !== 'activity' || canSeeHistory()).map(([k, l, i]) => `<a class="item ${S.route.name === k ? 'active' : ''}" href="#/${k === 'dashboard' ? '' : k}"><span class="ico">${i}</span>${l}${k === 'ci' && allLive().length ? ' <span class="live-dot"></span>' : ''}</a>`).join('') +
       `<div class="spacer"></div><div class="status"><a href="#" data-act="who" title="who is at this browser">You: ${esc(viewerName())}</a></div>` +
       `<div class="status"><span class="dot ${S.backend === 'static' ? '' : 'on'}"></span>${S.backend === 'server' ? 'saving to data/' : S.backend === 'github' ? `GitHub · ${esc(ghConfig().owner)}/${esc(ghConfig().repo)}` : 'browser-only mode'}</div>`;
   }
@@ -1154,7 +1197,7 @@
     const openPhases = new Set($$('details[data-phase][open]', v).map(d => d.dataset.phase));
     const views = {
       dashboard: () => vDashboard(), projects: () => r.id ? vProject(r.id) : vProjects(), people: () => r.id ? vPerson(r.id) : vPeople(),
-      learning: () => vLearning(r.id), activity: () => vActivity(), ci: () => vCI(), data: () => vData(),
+      learning: () => vLearning(r.id), activity: () => canSeeHistory() ? vActivity() : vDashboard(), ci: () => vCI(), data: () => vData(),
     };
     const notice = S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
@@ -1231,7 +1274,7 @@
   $('#fab').addEventListener('click', () => editActivity(null, {}));
 
   function exportAll() {
-    const blob = new Blob([JSON.stringify(Object.fromEntries(COLLECTIONS.map(c => [c, S.data[c]])), null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(Object.fromEntries(COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => [c, S.data[c]])), null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `team-tracker-${today()}.json`; a.click(); URL.revokeObjectURL(a.href);
   }
   async function importFile(e) {
