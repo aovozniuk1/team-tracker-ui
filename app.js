@@ -71,7 +71,15 @@
 
   // ---------- GitHub backend: data/*.json in a (private) repo, read and written with the viewer's own token
   const GH_DEFAULT = { owner: 'aovozniuk1', repo: 'team-tracker', branch: 'main', token: '', privateRepo: 'team-tracker-private' };
-  function ghConfig() { try { return { ...GH_DEFAULT, ...JSON.parse(localStorage.getItem(LS + 'gh') || '{}') }; } catch { return { ...GH_DEFAULT }; } }
+  // Where site data cannot be kept at all, a token taken back from the password manager lives
+  // for this visit only.
+  let memToken = '';
+  function ghConfig() {
+    let cfg;
+    try { cfg = { ...GH_DEFAULT, ...JSON.parse(localStorage.getItem(LS + 'gh') || '{}') }; } catch { cfg = { ...GH_DEFAULT }; }
+    if (!cfg.token && memToken) cfg.token = memToken;
+    return cfg;
+  }
   function ghStore(cfg) {
     try {
       localStorage.setItem(LS + 'gh', JSON.stringify(cfg));
@@ -83,6 +91,30 @@
     catch { return false; }
   }
   const ghReady = () => { const g = ghConfig(); return !!(g.token && g.owner && g.repo && g.branch); };
+
+  // A browser set to clear site data on close wipes the token every time it closes. Saved
+  // passwords are not site data, so the token is also handed to the browser's password manager
+  // and taken back from there whenever the page finds itself disconnected.
+  const passwordStoreWorks = () => typeof window.PasswordCredential === 'function' && !!(navigator.credentials && navigator.credentials.store);
+  async function keepInPasswordStore(cfg) {
+    if (!passwordStoreWorks() || !cfg.token) return false;
+    try {
+      await navigator.credentials.store(new PasswordCredential({ id: `${cfg.owner}/${cfg.repo}`, password: cfg.token, name: 'Team Tracker' }));
+      return true;
+    } catch { return false; }
+  }
+  async function fromPasswordStore(mediation) {
+    if (!passwordStoreWorks()) return '';
+    try {
+      const c = await navigator.credentials.get({ password: true, mediation });
+      return (c && c.password) || '';
+    } catch { return ''; }
+  }
+  function restoreToken(token) {
+    if (!token) return false;
+    if (!ghStore({ ...ghConfig(), token })) memToken = token;
+    return true;
+  }
   const ghUrl = c => {
     const g = ghConfig();
     const repo = PRIVATE.has(c) ? (g.privateRepo || '') : g.repo;
@@ -119,6 +151,7 @@
     return { ok: true };
   }
   async function connectGitHub() {
+    if (!ghReady() && restoreToken(await fromPasswordStore('optional'))) { location.reload(); return; }
     const g = ghConfig();
     const v = await form('Connect to GitHub', [
       { key: 'owner', label: 'Repository owner', required: true },
@@ -128,15 +161,20 @@
       { key: 'token', label: 'Fine-grained personal access token', type: 'password', required: true, help: 'Contents: read and write, on that one repository. Stored in this browser only; never sent anywhere but api.github.com.' },
     ], { ...g, token: '' });
     if (!v) return;
-    if (!ghStore(v)) {
+    const kept = ghStore(v);
+    const saved = await keepInPasswordStore(v);
+    if (!kept && !saved) {
       alert('This browser refused to keep the connection.\n\nThat happens in a private window, or when the browser is set to block site data. Open the page in a normal window and try again — nothing else is wrong with the token.');
       return;
     }
+    if (!kept) memToken = v.token;
     location.reload();
   }
-  function disconnectGitHub() {
-    if (!confirm('Forget the GitHub token in this browser?')) return;
-    ghStore({ ...ghConfig(), token: '' }); location.reload();
+  async function disconnectGitHub() {
+    if (!confirm('Forget the GitHub token in this browser?\n\nA copy in the browser\u2019s password manager stays there, but the page stops signing in with it on its own. Delete it in the password manager to remove it for good.')) return;
+    ghStore({ ...ghConfig(), token: '' }); memToken = '';
+    try { if (navigator.credentials && navigator.credentials.preventSilentAccess) await navigator.credentials.preventSilentAccess(); } catch { /* nothing to prevent */ }
+    location.reload();
   }
 
   async function fetchCollection(c) {
@@ -154,6 +192,7 @@
       const r = await fetch('/api/_meta', { cache: 'no-store' });
       if (r.ok) { const m = await r.json(); S.server = !!m.server; S.dataDir = m.dataDir || ''; }
     } catch { S.server = false; }
+    if (!S.server && !ghReady()) S.restoredToken = restoreToken(await fromPasswordStore('silent'));
     S.backend = S.server ? 'server' : ghReady() ? 'github' : 'static';
     if (S.backend === 'github') {
       try {
@@ -1102,6 +1141,9 @@
     const ghCard = S.server ? '' : `<div class="card" style="margin-bottom:14px"><h3>GitHub backend</h3>
         ${S.backend === 'github' ? `<p class="small">Reading and writing <span class="mono">data/*.json</span> in <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span> on branch <span class="mono">${esc(g.branch)}</span> with the token stored in this browser.${S.ghError ? ` <span class="pill red">last read failed: ${esc(S.ghError)}</span>` : ''}</p>
           <p class="small">${S.privateOk ? `The activity log is being read from <span class="mono">${esc(g.owner)}/${esc(g.privateRepo)}</span>.` : 'This token reaches no activity log, so none is shown. That is the normal state for everyone but the lead.'}</p>
+          <p class="small">${passwordStoreWorks()
+            ? `This browser also keeps the connection in its password manager${S.restoredToken ? ', and that is where it was taken from on this visit' : ''}, so a browser that clears site data on close does not disconnect you.`
+            : 'This browser keeps the connection only in its site data. If it is set to clear site data on close, you will have to connect again after closing it; Safari also clears it for a site not opened for about a week.'}</p>
           <p class="small">${S.ghUser ? (personByLogin(S.ghUser) ? `Signed in as <b>${esc(S.ghUser)}</b>, recognised as <b>${esc(viewerName())}</b> — everything you post is signed that way.` : `Signed in as <b>${esc(S.ghUser)}</b>, but no person on the team carries that GitHub username. Put it on their profile so their posts are signed automatically.`) : 'This token does not say who owns it, so posts are signed with the name picked in the menu.'}</p><div class="actions"><button class="btn" data-act="gh-connect">Change connection</button><button class="btn danger" data-act="gh-disconnect">Forget token</button></div>`
         : `<p class="small">This page holds no data. Connect it to the private repository that does: create a <b>fine-grained personal access token</b> on GitHub (Settings → Developer settings) scoped to that one repository with <b>Contents: read and write</b> (add <b>Actions: read and write</b> to use the Run and Refresh buttons), then paste it here. It is kept in this browser only and sent only to api.github.com.</p>
           ${storageWorks() ? '' : '<div class="banner">This browser is not keeping site data, so a connection cannot be remembered here. That is what a private window or a “block site data” setting does. Open the page in a normal window.</div>'}
