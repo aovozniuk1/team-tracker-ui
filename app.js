@@ -21,6 +21,7 @@
 
   const STATUS = ['active', 'paused', 'parked', 'done'];
   const HEALTH = ['green', 'yellow', 'red', 'unknown'];
+  const ENV_STATUS = ['up', 'degraded', 'down', 'unknown'];
   const ACT_TYPES = ['update', 'blocker', 'decision', 'one-on-one', 'review', 'incident', 'learning', 'milestone'];
   const LESSON_STATUS = ['not-started', 'in-progress', 'done', 'gate-passed', 'stuck'];
   const LESSON_GLYPH = { 'not-started': '', 'in-progress': '…', 'done': '✓', 'gate-passed': '★', 'stuck': '!' };
@@ -51,8 +52,8 @@
   const parseLines = s => String(s || '').split('\n').map(x => x.trim()).filter(Boolean);
   const parseRecords = (s, cols) => parseLines(s).map(line => { const parts = line.split('|').map(x => x.trim()); const o = {}; cols.forEach((c, i) => { o[c] = i === cols.length - 1 ? parts.slice(i).join(' | ') : (parts[i] || ''); }); return o; });
   const recordsToLines = (arr, cols) => (arr || []).map(o => cols.map(c => o[c] || '').join(' | ').replace(/( \| )+$/, '')).join('\n');
-  // The form shows a few columns of each record; anything else it holds (an environment's status
-  // and the day it was checked) is carried over from the record of the same name, not dropped.
+  // The form shows a few columns of each record; anything else it holds is carried over from the
+  // record of the same name, not dropped.
   const keepUnshown = (next, prev, cols) => (next || []).map(r => {
     const was = (prev || []).find(x => String(x[cols[0]] || '') === String(r[cols[0]] || ''));
     return was ? { ...was, ...r } : r;
@@ -121,9 +122,12 @@
     if (!ghStore({ ...ghConfig(), token })) memToken = token;
     return true;
   }
+  // The log's repository is not a setting: a name the viewer could change would let any
+  // repository they can write to pass for the lead's.
+  const LOG_REPO = GH_DEFAULT.privateRepo;
   const ghUrl = c => {
     const g = ghConfig();
-    const repo = PRIVATE.has(c) ? (g.privateRepo || '') : g.repo;
+    const repo = PRIVATE.has(c) ? LOG_REPO : g.repo;
     return `https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(repo)}/contents/data/${c}.json`;
   };
   const ghHeaders = () => ({ Authorization: `Bearer ${ghConfig().token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' });
@@ -162,7 +166,6 @@
     const v = await form('Connect to GitHub', [
       { key: 'owner', label: 'Repository owner', required: true },
       { key: 'repo', label: 'Repository', required: true, help: 'the repository that holds data/*.json' },
-      { key: 'privateRepo', label: 'Log repository', help: 'The lead\u2019s own repository, holding the activity log. Leave it as it is: a token without access to it simply sees no log.' },
       { key: 'branch', label: 'Branch', required: true },
       { key: 'token', label: 'Personal access token', type: 'password', required: true, help: 'Invited to these repositories: a classic token with the repo scope, because GitHub does not let fine-grained tokens reach another person\u2019s repositories. Owner of them: a fine-grained token with Contents and Actions: read and write. Kept in this browser and its password manager; sent nowhere but api.github.com.' },
     ], { ...g, token: '' });
@@ -230,6 +233,9 @@
       }
       S.data[c] = normalize(c, obj);
     }
+    S.me = loginHolders(S.ghUser).length === 1 ? loginHolders(S.ghUser)[0].id : '';
+    // The lead's own record: the one person carrying the login that owns the tracker.
+    S.leadMe = loginHolders(GH_DEFAULT.owner).length === 1 ? loginHolders(GH_DEFAULT.owner)[0].id : '';
   }
 
   // With `replay`, a conflict only reloads the collection and returns 'conflict', so the caller
@@ -342,11 +348,26 @@
   const acts = () => canSeeHistory() ? S.data.activities : [];
   // Learning progress is personal: the lead sees everyone's, anybody else only their own. "Own" is the
   // person the GitHub token names; the choice in the menu signs posts and opens nobody's progress.
-  const signedInAs = () => personByLogin(S.ghUser)?.id || '';
+  // It is settled from people.json as read at load time, and only a login carried by exactly one
+  // person counts, so no edit made in this page can move it.
+  const signedInAs = () => S.me || '';
   const canSeeLearningOf = pid => canSeeHistory() || (!!pid && pid === signedInAs());
+  // A person's thread is between that person and the lead.
+  const canSeeThreadOf = pid => canSeeHistory() || (!!pid && pid === signedInAs());
+  // The lead edits every project. A project's own lead edits what is written and planned in it;
+  // what the project is and who is on it stay the lead's.
+  const OWNER_FIELDS = new Set(['summary', 'status', 'health', 'healthReason', 'nextMilestone', 'workstreams', 'keyFacts', 'risks', 'openQuestions', 'nextSteps', 'notes', 'stack', 'systems']);
+  const canEditProject = p => !!p && (canSeeHistory() || (!!signedInAs() && p.leadId === signedInAs()));
+  function mayChange(p, path) {
+    if (canSeeHistory()) return true;
+    if (!canEditProject(p)) return false;
+    const top = path.split('/')[0];
+    return top === 'environments' ? /^environments\/.+\/(notes|status)$/.test(path) : top === 'suggested' || OWNER_FIELDS.has(top);
+  }
   function learningLock() {
     if (S.backend !== 'github') return 'Learning progress is shown to the person it belongs to when this page is connected to GitHub with their own token.';
     if (!S.ghUser) return 'GitHub did not say which account this token belongs to, so no learning progress is shown. Reload the page to ask again.';
+    if (loginHolders(S.ghUser).length > 1) return `More than one person on the team carries the GitHub username ${S.ghUser}, so none of them is taken to be you and no learning progress is shown.`;
     return `No person on the team carries the GitHub username ${S.ghUser}, so no learning progress is shown.`;
   }
   // A course marked leadOnly (the lead's own track) is not shown to anyone else.
@@ -379,21 +400,24 @@
 
   // ---------- who is at this browser, and the thread on a person's page
   const messages = () => S.data.messages || [];
-  const threadOf = pid => messages().filter(m => m.personId === pid).sort((a, b) => (a.at || '').localeCompare(b.at || ''));
+  const visibleMessages = () => messages().filter(m => canSeeThreadOf(m.personId));
+  const threadOf = pid => canSeeThreadOf(pid) ? messages().filter(m => m.personId === pid).sort((a, b) => (a.at || '').localeCompare(b.at || '')) : [];
+  const mayRemoveMessage = m => canSeeHistory() || (!!m.authorId && m.authorId === signedInAs() && canSeeThreadOf(m.personId));
   const openAsks = pid => threadOf(pid).filter(m => m.question && !m.resolved);
   // Identity comes from the GitHub account the page is connected with, so a post cannot be
   // signed with someone else's name. Without that (local server, no connection) it falls back
   // to a per-browser choice.
-  const personByLogin = login => login ? people().find(p => (p.githubLogin || '').toLowerCase() === String(login).toLowerCase()) : null;
+  const sameLogin = (a, b) => !!a && !!b && String(a).toLowerCase() === String(b).toLowerCase();
+  const loginHolders = login => login ? people().filter(p => sameLogin(p.githubLogin, login)) : [];
   function viewerId() {
-    const byLogin = personByLogin(S.ghUser);
-    if (byLogin) return byLogin.id;
+    if (S.me) return S.me;
     try { return localStorage.getItem(LS + 'viewer') || ''; } catch { return ''; } }
   function setViewer(id) { try { id ? localStorage.setItem(LS + 'viewer', id) : localStorage.removeItem(LS + 'viewer'); } catch { /* ignore */ } }
   const viewerName = () => person(viewerId())?.name || 'not set';
+  const threadReaders = pid => canSeeHistory() && pid === viewerId() ? 'you' : `${pid === viewerId() ? 'you' : pname(pid)} and the lead`;
   async function chooseViewer() {
     if (!people().length) { toast('Add people first'); return; }
-    if (personByLogin(S.ghUser)) { toast(`You are signed in to GitHub as ${S.ghUser}, so posts are signed as ${viewerName()}.`); return; }
+    if (S.me) { toast(`You are signed in to GitHub as ${S.ghUser}, so posts are signed as ${viewerName()}.`); return; }
     const v = await form('Who is using this browser?', [
       { key: 'id', label: 'You are', type: 'select', options: peopleOpts(), allowEmpty: true, emptyLabel: 'not set',
         help: 'Kept on this device only, so your posts are signed.' },
@@ -402,24 +426,25 @@
     setViewer(v.id); render();
   }
   async function postMessage(pid, question) {
+    if (!canSeeThreadOf(pid)) return;
     if (!viewerId()) { await chooseViewer(); if (!viewerId()) { toast('Say who you are first'); return; } }
     const v = await form(question ? 'Ask a question' : 'Leave a note', [
       { key: 'text', label: question ? 'Your question' : 'Message', type: 'textarea', required: true, rows: 5,
-        help: question ? 'It stays marked open until someone marks it answered.' : 'Everyone who opens this profile can read it.' },
+        help: `${question ? 'It stays marked open until it is marked answered. ' : ''}Only ${threadReaders(pid)} can read it.` },
     ], {});
     if (!v) return;
     messages().push({ id: uid('m'), personId: pid, authorId: viewerId(), at: new Date().toISOString(), text: v.text, question: !!question, resolved: false });
     await save('messages'); render();
   }
   async function toggleAnswered(id) {
-    const m = messages().find(x => x.id === id); if (!m) return;
+    const m = messages().find(x => x.id === id); if (!m || !canSeeThreadOf(m.personId)) return;
     m.resolved = !m.resolved;
     m.resolvedBy = m.resolved ? viewerId() : '';
     m.resolvedAt = m.resolved ? new Date().toISOString() : '';
     await save('messages'); render();
   }
   async function deleteMessage(id) {
-    const m = messages().find(x => x.id === id); if (!m) return;
+    const m = messages().find(x => x.id === id); if (!m || !mayRemoveMessage(m)) return;
     if (!confirm('Remove this message?')) return;
     S.data.messages = messages().filter(x => x.id !== id);
     await save('messages'); render();
@@ -994,7 +1019,7 @@
     for (const b of openBlockers()) {
       out.push({ lvl: 'red', text: `Blocker${b.projectId ? ' on ' + (project(b.projectId)?.name || '') : ''}${b.personId ? ' (' + pname(b.personId) + ')' : ''}: ${trunc(b.text, 120)}`, href: b.projectId ? `#/projects/${b.projectId}` : '#/activity' });
     }
-    for (const p of activePeople()) {
+    for (const p of activePeople().filter(x => canSeeThreadOf(x.id))) {
       const q = openAsks(p.id);
       if (q.length) out.push({ lvl: 'yellow', text: `${p.name}: ${q.length} open question${q.length === 1 ? '' : 's'}, oldest ${ago((q[0].at || '').slice(0, 10))}`, href: `#/people/${p.id}/questions` });
     }
@@ -1022,6 +1047,7 @@
       const bg = document.createElement('div'); bg.className = 'modal-bg';
       const fid = uid('f');
       const render = f => {
+        if (f.type === 'note') return `<p class="hint" style="margin:0">${esc(f.text)}</p>`;
         const v = values[f.key];
         const req = f.required ? ' required' : '';
         const help = f.help ? `<div class="help">${esc(f.help)}</div>` : '';
@@ -1060,7 +1086,11 @@
         e.preventDefault();
         const out = {};
         for (const f of fields) {
-          if (f.type === 'multiselect') out[f.key] = $$(`input[name="${f.key}"]:checked`, fm).map(i => i.value);
+          if (f.type === 'note') continue;
+          // a list left as it was comes back as it was, not as the lines it was shown in
+          const ta = fm.elements[f.key];
+          if ((f.type === 'lines' || f.type === 'records') && Array.isArray(values[f.key]) && ta.value === ta.defaultValue) out[f.key] = clone(values[f.key]);
+          else if (f.type === 'multiselect') out[f.key] = $$(`input[name="${f.key}"]:checked`, fm).map(i => i.value);
           else if (f.type === 'checkbox') out[f.key] = $(`input[name="${f.key}"]`, fm).checked;
           else if (f.type === 'lines') out[f.key] = parseLines(fm.elements[f.key].value);
           else if (f.type === 'records') out[f.key] = parseRecords(fm.elements[f.key].value, f.cols);
@@ -1080,55 +1110,347 @@
 
   // ---------- actions
   async function editProject(id) {
+    const lead = canSeeHistory();
     const p = id ? project(id) : { id: '', status: 'active', health: 'unknown', memberIds: [], workstreams: [] };
+    if (!p || (id ? !canEditProject(p) : !lead)) return;
+    const base = clone(p), envs = p.environments || [];
     const v = await form(id ? `Edit project — ${p.name}` : 'New project', [
+      { type: 'note', text: 'As the project’s lead you edit what is written and planned in it. Its name, client, lead, members, start date, repositories, list of environments and local docs are set by the team lead.', own: true },
       { key: 'name', label: 'Name', required: true },
       { key: 'code', label: 'Short code', help: 'e.g. ALPHA, REPIPE' },
       { key: 'client', label: 'Client / product owner' },
-      { key: 'status', label: 'Status', type: 'select', options: opt(STATUS) },
-      { key: 'health', label: 'Health', type: 'select', options: opt(HEALTH) },
-      { key: 'healthReason', label: 'Health reason', help: 'One line: why green / yellow / red right now' },
+      { key: 'status', label: 'Status', type: 'select', options: opt(STATUS), own: true },
+      { key: 'health', label: 'Health', type: 'select', options: opt(HEALTH), own: true },
+      { key: 'healthReason', label: 'Health reason', type: 'textarea', rows: 2, help: 'Why green / yellow / red right now', own: true },
       { key: 'leadId', label: 'Lead (your mentee who runs it)', type: 'select', options: peopleOpts([p.leadId]), allowEmpty: true, emptyLabel: 'Unassigned' },
       { key: 'memberIds', label: 'Other members', type: 'multiselect', options: peopleOpts(p.memberIds || []) },
-      { key: 'summary', label: 'Summary', type: 'textarea' },
+      { key: 'summary', label: 'Summary', type: 'textarea', own: true },
       { key: 'startedOn', label: 'Started on', type: 'date' },
-      { key: 'milestoneText', label: 'Next milestone' },
-      { key: 'milestoneDue', label: 'Milestone due', type: 'date' },
-      { key: 'stackText', label: 'Stack', help: 'comma-separated' },
+      { key: 'milestoneText', label: 'Next milestone', own: true },
+      { key: 'milestoneDue', label: 'Milestone due', type: 'date', own: true },
+      { key: 'stackText', label: 'Stack', help: 'comma-separated', own: true },
       { key: 'aliasesText', label: 'Aliases', help: 'comma-separated, other names people use' },
       { key: 'repos', label: 'Repositories', type: 'records', cols: ['name', 'url', 'branch', 'localPath'], help: 'one per line: name | url | branch | local path' },
-      { key: 'environments', label: 'Environments', type: 'records', cols: ['name', 'url', 'notes'], help: 'one per line: name | url | notes' },
-      { key: 'systems', label: 'Systems involved', type: 'records', cols: ['name', 'url', 'role'], help: 'one per line: name | url | role' },
+      { key: 'environments', label: 'Environments', type: 'records', cols: ['name', 'url'], help: 'one per line: name | url' },
+      ...envs.flatMap((e, i) => [
+        { key: `envStatus${i}`, label: `${e.name} — status`, type: 'select', options: opt([...new Set([...ENV_STATUS, ...(e.status ? [e.status] : [])])]), allowEmpty: true, emptyLabel: 'not set', own: true },
+        { key: `envNotes${i}`, label: `${e.name} — notes`, type: 'textarea', own: true },
+      ]),
+      { key: 'systems', label: 'Systems involved', type: 'records', cols: ['name', 'url', 'role'], help: 'one per line: name | url | role', own: true },
       { key: 'localDocs', label: 'Local docs', type: 'records', cols: ['path', 'what'], help: 'one per line: path | what it is' },
-      { key: 'keyFacts', label: 'Key facts', type: 'lines', rows: 5, help: 'one per line' },
-      { key: 'risks', label: 'Risks', type: 'lines', help: 'one per line' },
-      { key: 'openQuestions', label: 'Open questions', type: 'lines', help: 'one per line' },
-      { key: 'nextSteps', label: 'Next steps', type: 'lines', help: 'one per line' },
-      { key: 'notes', label: 'Notes', type: 'textarea' },
-    ], {
+      { key: 'keyFacts', label: 'Key facts', type: 'lines', rows: 5, help: 'one per line', own: true },
+      { key: 'risks', label: 'Risks', type: 'lines', help: 'one per line', own: true },
+      { key: 'openQuestions', label: 'Open questions', type: 'lines', help: 'one per line', own: true },
+      { key: 'nextSteps', label: 'Next steps', type: 'lines', help: 'one per line', own: true },
+      { key: 'notes', label: 'Notes', type: 'textarea', own: true },
+    ].filter(f => lead ? f.type !== 'note' : f.own), {
       ...p,
       milestoneText: p.nextMilestone?.text || '', milestoneDue: p.nextMilestone?.due || '',
       stackText: (p.stack || []).join(', '), aliasesText: (p.aliases || []).join(', '),
+      ...Object.fromEntries(envs.flatMap((e, i) => [[`envStatus${i}`, e.status || ''], [`envNotes${i}`, e.notes || '']])),
     });
     if (!v) return;
+    const envList = listEnvs(lead ? v.environments : envs.map(e => ({ name: e.name, url: e.url })), envs, v);
     const np = {
       ...p,
-      id: p.id || slug(v.name),
-      name: v.name, code: v.code, client: v.client, status: v.status, health: v.health, healthReason: v.healthReason,
-      leadId: v.leadId || '', memberIds: v.memberIds, summary: v.summary, startedOn: v.startedOn,
+      status: v.status, health: v.health, healthReason: v.healthReason, summary: v.summary,
       nextMilestone: { text: v.milestoneText, due: v.milestoneDue },
       stack: v.stackText.split(',').map(s => s.trim()).filter(Boolean),
-      aliases: v.aliasesText.split(',').map(s => s.trim()).filter(Boolean),
-      repos: keepUnshown(v.repos, p.repos, ['name']),
-      environments: keepUnshown(v.environments, p.environments, ['name']),
       systems: keepUnshown(v.systems, p.systems, ['name']),
-      localDocs: keepUnshown(v.localDocs, p.localDocs, ['path']),
       keyFacts: v.keyFacts, risks: v.risks, openQuestions: v.openQuestions, nextSteps: v.nextSteps, notes: v.notes,
+      environments: envList.list,
+      ...(lead ? {
+        id: p.id || slug(v.name),
+        name: v.name, code: v.code, client: v.client, leadId: v.leadId || '', memberIds: v.memberIds, startedOn: v.startedOn,
+        aliases: v.aliasesText.split(',').map(s => s.trim()).filter(Boolean),
+        repos: keepUnshown(v.repos, p.repos, ['name']),
+        localDocs: keepUnshown(v.localDocs, p.localDocs, ['path']),
+      } : {}),
       updatedOn: today(),
     };
-    if (id) projects().splice(projects().findIndex(x => x.id === id), 1, np); else projects().push(np);
-    await save('projects');
-    location.hash = `#/projects/${np.id}`; render();
+    if (!id) {
+      if (await saveProject(np.id, { create: np })) location.hash = `#/projects/${np.id}`;
+      render(); return;
+    }
+    const ops = diffOps(base, np, envList.renames);
+    if (!ops.length) { toast('Nothing changed'); return; }
+    // A renamed environment keeps its marks; only what was really rewritten is marked.
+    const was = renamedEnvs(base, envList.renames);
+    await saveProject(id, { base, ops, marks: reviewKeys(was, np).filter(k => !sameText(getPath(was, k), getPath(np, k))) });
+    location.hash = `#/projects/${id}`; render();
+  }
+  // The form lists each environment's name and url; its status and notes have fields of their own.
+  // A line with a new name takes over the environment it replaced, found by its url, or by its line
+  // when one of the two has no url: a rename, which keeps everything else the environment holds.
+  // A new name with a new url is another environment, and starts empty.
+  function listEnvs(lines, envs, v) {
+    const names = new Set(lines.map(l => l.name)), used = new Set(), gone = e => !names.has(e.name) && !used.has(e);
+    const from = lines.map((l, i) => {
+      const e = envs.find(x => x.name === l.name) || envs.find(x => gone(x) && x.url && x.url === l.url) || (envs[i] && gone(envs[i]) && (!l.url || !envs[i].url) ? envs[i] : null);
+      if (e) used.add(e);
+      return e;
+    });
+    const list = lines.map((l, i) => {
+      const e = from[i], k = envs.indexOf(e);
+      return e ? { ...e, name: l.name, url: l.url, status: v[`envStatus${k}`], notes: v[`envNotes${k}`] } : { name: l.name, url: l.url };
+    });
+    return { list, renames: from.map((e, i) => e && e.name !== lines[i].name ? [e.name, lines[i].name] : null).filter(Boolean) };
+  }
+
+  // ---------- project saves that keep everyone's changes
+  // Fields the weekly review also writes. A change made here is marked in `edited`; the review then
+  // leaves that field alone and files its own answer under `suggested` instead.
+  const REVIEWED = ['summary', 'healthReason', 'health', 'keyFacts', 'risks', 'openQuestions', 'nextSteps'];
+  const envKeys = r => (r.environments || []).flatMap(e => [`environments/${e.name}/notes`, `environments/${e.name}/status`]);
+  const reviewKeys = (...rs) => [...new Set([...REVIEWED, ...rs.flatMap(envKeys)])];
+  // A path names one field of a project record: `summary`, `environments/<name>/notes`,
+  // `environment/<name>` (one environment as a whole), `workstreams/<id>`, `edited/<field>`,
+  // `suggested/<field>`, and ENV_ORDER for the order of the environments.
+  const ENV_ORDER = 'environmentOrder';
+  function splitPath(path) {
+    const i = path.indexOf('/'); if (i < 0) return { key: path };
+    const top = path.slice(0, i), rest = path.slice(i + 1), j = rest.lastIndexOf('/');
+    if (top === 'environments') return { env: rest.slice(0, j), prop: rest.slice(j + 1) };
+    if (top === 'environment') return { whole: rest };
+    if (top === 'workstreams') return { ws: rest };
+    return { map: top, key: rest };
+  }
+  const envOf = (r, name) => (r.environments || []).find(e => e.name === name);
+  const wsOf = (r, id) => (r.workstreams || []).find(w => w.id === id);
+  const envNames = r => (r.environments || []).map(e => e.name);
+  function getPath(r, path) {
+    if (path === ENV_ORDER) return envNames(r);
+    const s = splitPath(path);
+    if (s.env !== undefined) return envOf(r, s.env)?.[s.prop];
+    if (s.whole !== undefined) return envOf(r, s.whole);
+    if (s.ws !== undefined) return wsOf(r, s.ws);
+    if (s.map) return r[s.map]?.[s.key];
+    return r[s.key];
+  }
+  const putItem = (list, i, v) => { if (v === undefined) { if (i >= 0) list.splice(i, 1); } else if (i >= 0) list[i] = v; else list.push(v); };
+  // An environment that is no longer in the record is left alone; the caller reports it. Names the
+  // order does not know keep their place after the ones it does.
+  function setPath(r, path, v) {
+    if (path === ENV_ORDER) { const at = n => { const i = v.indexOf(n); return i < 0 ? v.length : i; }; r.environments = (r.environments || []).map((e, i) => [e, i]).sort(([x, i], [y, j]) => at(x.name) - at(y.name) || i - j).map(([e]) => e); return; }
+    const s = splitPath(path);
+    if (s.env !== undefined) { const e = envOf(r, s.env); if (e) { if (v === undefined) delete e[s.prop]; else e[s.prop] = v; } return; }
+    if (s.whole !== undefined) { const list = r.environments ||= []; putItem(list, list.findIndex(e => e.name === s.whole), v); return; }
+    if (s.ws !== undefined) { const list = r.workstreams ||= []; putItem(list, list.findIndex(w => w.id === s.ws), v); return; }
+    if (s.map) { const m = r[s.map] ||= {}; if (v === undefined) delete m[s.key]; else m[s.key] = v; if (!Object.keys(m).length) delete r[s.map]; return; }
+    if (v === undefined) delete r[s.key]; else r[s.key] = v;
+  }
+  // A renamed environment takes its marks and pending suggestions along.
+  function renameEnv(r, was, now) {
+    envOf(r, was).name = now;
+    for (const m of ['edited', 'suggested']) for (const k of Object.keys(r[m] || {})) {
+      const s = splitPath(k);
+      if (s.env === was) { r[m][`environments/${now}/${s.prop}`] = r[m][k]; delete r[m][k]; }
+    }
+  }
+  const renamedEnvs = (r, renames) => { const c = clone(r); for (const [was, now] of renames) if (envOf(c, was)) renameEnv(c, was, now); return c; };
+  const isRename = op => { const s = splitPath(op.path); return s.env !== undefined && s.prop === 'name'; };
+  const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+  // Blank is blank however it is stored, and whitespace around text is not a change.
+  function canon(v) {
+    if (typeof v === 'string') return v.replace(/\r\n?/g, '\n').trim();
+    if (Array.isArray(v)) { const a = v.map(canon).filter(x => x !== ''); return a.length ? a : ''; }
+    if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) { const x = canon(v[k]); if (x !== '') o[k] = x; } return Object.keys(o).length ? o : ''; }
+    return v == null ? '' : v;
+  }
+  const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+  // Text that differs only in its spacing or line breaks says the same; the weekly review compares
+  // the same way. Such a difference is saved but never marks a field or makes a suggestion.
+  const loose = v => typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : Array.isArray(v) ? v.map(loose)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, loose(x)])) : v;
+  const sameText = (a, b) => same(loose(a), loose(b));
+  // What a save changed, field by field, so it can be applied again to a newer copy of the record.
+  // Environments are matched by name, renames included, so a change to one never carries the others.
+  function diffOps(a, b, renames = []) {
+    const ops = [], add = (path, from, to) => { if (!same(from, to)) ops.push({ path, from: clone(from), to: clone(to) }); };
+    const ids = r => (r.workstreams || []).map(w => w.id);
+    const unique = xs => xs.every(Boolean) && new Set(xs).size === xs.length;
+    const byName = unique(envNames(a)) && unique(envNames(b));
+    if (byName) {
+      const was = renamedEnvs(a, renames);
+      for (const [from, to] of renames) ops.push({ path: `environments/${from}/name`, from, to });
+      for (const e of b.environments || []) {
+        const w = envOf(was, e.name);
+        if (!w) { add(`environment/${e.name}`, undefined, e); continue; }
+        for (const x of new Set([...Object.keys(w), ...Object.keys(e)])) if (x !== 'name') add(`environments/${e.name}/${x}`, w[x], e[x]);
+      }
+      for (const e of was.environments || []) if (!envOf(b, e.name)) add(`environment/${e.name}`, e, undefined);
+      const kept = envNames(was).filter(n => envOf(b, n)).concat(envNames(b).filter(n => !envOf(was, n)));
+      if (kept.join('\n') !== envNames(b).join('\n')) ops.push({ path: ENV_ORDER, from: envNames(was), to: envNames(b) });
+    }
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      if (k === 'edited' || k === 'suggested' || k === 'updatedOn' || (k === 'environments' && byName)) continue;
+      if (k === 'workstreams' && unique(ids(a)) && unique(ids(b))) {
+        for (const w of new Set([...ids(a), ...ids(b)])) add(`workstreams/${w}`, wsOf(a, w), wsOf(b, w));
+      } else add(k, a[k], b[k]);
+    }
+    return ops;
+  }
+  // Settled at load, never from the per-browser choice.
+  const editorId = () => S.me || (canSeeHistory() ? S.leadMe : '');
+  // Who changed a field between two copies of a record, where the record says so.
+  function changedBy(was, now, path) {
+    const s = splitPath(path);
+    if (s.map === 'suggested') { const g = now.suggested?.[s.key]; return g ? `the weekly review${g.on ? ' on ' + g.on : ''}` : ''; }
+    const m = now.edited?.[path];
+    if (m && !same(m, was.edited?.[path])) return `${m.by ? pname(m.by) : 'someone'}${m.on ? ' on ' + m.on : ''}`;
+    const reviewed = REVIEWED.includes(path) || (s.env !== undefined && ['notes', 'status'].includes(s.prop));
+    const seen = s.env !== undefined && getPath(now, `environments/${s.env}/checkedOn`) !== getPath(was, `environments/${s.env}/checkedOn`);
+    return reviewed && (seen || !same(now.checkedAgainst, was.checkedAgainst)) ? 'the weekly review' : '';
+  }
+  const FIELD_NAMES = { name: 'Name', code: 'Short code', client: 'Client', status: 'Status', health: 'Health', healthReason: 'Health reason', leadId: 'Lead', memberIds: 'Other members', summary: 'Summary', startedOn: 'Started on', nextMilestone: 'Next milestone', stack: 'Stack', aliases: 'Aliases', repos: 'Repositories', environments: 'Environments', systems: 'Systems involved', localDocs: 'Local docs', keyFacts: 'Key facts', risks: 'Risks', openQuestions: 'Open questions', nextSteps: 'Next steps', notes: 'Notes', workstreams: 'Workstreams' };
+  function fieldLabel(path, hint) {
+    if (path === ENV_ORDER) return 'Order of the environments';
+    const s = splitPath(path);
+    if (s.map === 'suggested') return `Suggestion for ${fieldLabel(s.key)}`;
+    if (s.env !== undefined) return `${s.env} — ${s.prop}`;
+    if (s.whole !== undefined) return `Environment “${s.whole}”`;
+    if (s.ws !== undefined) return `Workstream ${hint && hint.name ? `“${hint.name}”` : s.ws}`;
+    return FIELD_NAMES[path] || label(path);
+  }
+  const recText = o => Object.entries(o).filter(([k, x]) => k !== 'id' && (typeof x === 'string' || typeof x === 'number') && String(x).trim()).map(([k, x]) => k === 'ownerId' ? pname(x) : String(x)).join(' · ');
+  function fmtVal(path, v) {
+    const s = splitPath(path);
+    if (s.map === 'suggested') return v ? fmtVal(s.key, v.value) : '<span class="muted">none: you settled it</span>';
+    if (canon(v) === '') return '<span class="muted">empty</span>';
+    if (Array.isArray(v)) return `<ul class="plain">${v.map(x => `<li>${esc(x && typeof x === 'object' ? recText(x) : x)}</li>`).join('')}</ul>`;
+    if (typeof v === 'object') return esc(recText(v));
+    return `<span style="white-space:pre-wrap">${esc(v)}</span>`;
+  }
+
+  // Why a suggestion the page showed is no longer there to settle. A dismiss keeps the mark of whoever
+  // wrote the field, so only a new mark names a person.
+  function settledMeanwhile(was, now, key) {
+    const m = now.edited?.[key], old = was.edited?.[key];
+    const wrote = !!m && (m.by !== old?.by || m.on !== old?.on || !same(getPath(now, key), getPath(was, key)));
+    if (now.suggested?.[key] || (!wrote && same(m, old))) return 'The weekly review changed or withdrew this suggestion; the page now shows the current one.';
+    if (!m) return 'This suggestion was already accepted meanwhile; the page now shows the field as it is.';
+    if (wrote) return `${m.by ? pname(m.by) : 'Someone'} edited this field meanwhile${m.on ? ' on ' + m.on : ''}, so the suggestion is settled; the page now shows the field as it is.`;
+    return 'This suggestion was already dismissed meanwhile; the page now shows the field as it is.';
+  }
+
+  // Fields this save and somebody else both changed: the person picks, field by field.
+  function askConflicts(p, items) {
+    return new Promise(resolve => {
+      const bg = document.createElement('div'); bg.className = 'modal-bg';
+      const fid = uid('f');
+      bg.innerHTML = `<form class="modal" id="${fid}" role="dialog" aria-modal="true" aria-label="Changed while you were editing"><header><h2>Changed while you were editing</h2><button type="button" class="btn ghost" data-x aria-label="Close">✕</button></header>
+        <div class="body"><p class="small" style="margin:0">${esc(p.name)} was saved again after you opened it, and ${items.length === 1 ? 'this field was' : 'these fields were'} changed there too. Choose what to keep. Everything else you changed is saved either way.</p>
+        ${items.map((it, i) => `<fieldset data-conflict="${esc(it.path)}" style="display:grid;gap:4px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:0;min-width:0"><legend class="small"><b>${esc(it.label)}</b></legend>
+          <div class="hint">${it.by ? `Changed meanwhile by ${esc(it.by)}.` : 'Changed meanwhile; the record does not say by whom.'}</div>
+          <div class="checks"><label><input type="radio" name="c${i}" value="mine" required> Keep yours</label></div><div class="small" style="padding-left:22px">${it.mine}</div>
+          <div class="checks"><label><input type="radio" name="c${i}" value="fresh"> Take the saved one</label></div><div class="small" style="padding-left:22px">${it.fresh}</div></fieldset>`).join('')}</div>
+        <footer><button type="button" class="btn" data-x>Cancel</button><button type="submit" class="btn primary">Save</button></footer></form>`;
+      document.body.appendChild(bg);
+      const close = val => { bg.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+      const onKey = e => { if (e.key === 'Escape') close(null); };
+      document.addEventListener('keydown', onKey);
+      $$('[data-x]', bg).forEach(b => b.addEventListener('click', () => close(null)));
+      const fm = $('#' + fid);
+      fm.addEventListener('submit', e => { e.preventDefault(); close(Object.fromEntries(items.map((it, i) => [it.path, fm.elements[`c${i}`].value]))); });
+      $('input', fm).focus();
+    });
+  }
+
+  // A project save carries only the fields it changed. When the file moved on meanwhile (another
+  // person, or the weekly review), it is read again and those fields are applied to the fresh
+  // record; a field changed on both sides is put to the person instead of being overwritten.
+  async function saveProject(id, { base = null, ops = [], marks = [], kind = 'edit', create = null, remove = false } = {}) {
+    const chosen = {}, sop = kind === 'edit' ? null : ops.find(op => splitPath(op.path).map === 'suggested');
+    let unsaved = new Map();
+    const unsavedText = () => [...unsaved].map(([k, why]) => `${fieldLabel(k)} (${why})`).join('; ');
+    for (let i = 0; ; i++) {
+      const list = projects(), cur = list.find(x => x.id === id);
+      if (create) {
+        if (cur) { toast(`Not saved: a project with the id ${id} was added meanwhile.`, 4000); render(); return false; }
+        list.push(clone(create));
+      } else if (remove) {
+        if (!cur) return true;
+        list.splice(list.indexOf(cur), 1);
+      } else {
+        if (!cur) { toast('Not saved: this project was deleted meanwhile.', 4000); render(); return false; }
+        if (!canEditProject(cur)) { toast('Not saved: you no longer lead this project.', 4000); render(); return false; }
+        // Accepting or dismissing answers one suggestion; once it has been replaced or settled, nothing is done.
+        if (sop && !same(getPath(cur, sop.path), sop.from)) { toast(settledMeanwhile(base || cur, cur, splitPath(sop.path).key), 5000); render(); return false; }
+        const r = clone(cur), mine = [], done = new Set(), wrote = new Set();
+        unsaved = new Map();
+        // renames first, so what else changed finds the environment under its new name
+        for (const op of ops.filter(isRename)) {
+          const was = splitPath(op.path).env;
+          if (!mayChange(cur, op.path)) unsaved.set(op.path, 'only the team lead changes it');
+          else if (envOf(r, op.to)) { if (envOf(r, was)) unsaved.set(op.path, 'another environment has that name now'); else done.add(op.path); }
+          else if (!envOf(r, was)) unsaved.set(op.path, 'that environment is no longer in the record');
+          else { renameEnv(r, was, op.to); done.add(op.path); wrote.add(op.path); }
+        }
+        for (const op of ops) {
+          if (isRename(op)) continue;
+          const env = splitPath(op.path).env;
+          if (!mayChange(cur, op.path)) unsaved.set(op.path, 'only the team lead changes it');
+          else if (env !== undefined && !envOf(r, env)) unsaved.set(op.path, 'that environment is no longer in the record');
+          else mine.push(op);
+        }
+        // the order of the environments is taken as it was set, around whatever was added meanwhile
+        const moved = op => { if (op.path === ENV_ORDER) return false; const now = getPath(r, op.path); return !same(now, op.from) && !same(now, op.to); };
+        const open = mine.filter(op => moved(op) && !(chosen[op.path] && same(chosen[op.path].seen, getPath(r, op.path))));
+        if (open.length) {
+          const pick = await askConflicts(cur, open.map(op => ({ path: op.path, label: fieldLabel(op.path, op.to || op.from), by: changedBy(base || cur, r, op.path),
+            mine: fmtVal(op.path, op.to), fresh: fmtVal(op.path, getPath(r, op.path)) })));
+          if (!pick) { toast('Not saved. The project shows what is saved now.', 4000); render(); return false; }
+          for (const op of open) chosen[op.path] = { keep: pick[op.path] === 'mine', seen: clone(getPath(r, op.path)) };
+          if (projects() !== list || !list.includes(cur)) continue;
+        }
+        const keepSaved = op => moved(op) && !chosen[op.path].keep;
+        // and it is done whole or not at all
+        const none = !!sop && (unsaved.size > 0 || mine.some(keepSaved));
+        for (const op of mine) {
+          if (none || keepSaved(op)) continue;
+          if (!same(getPath(r, op.path), op.to)) { const was = JSON.stringify(r); setPath(r, op.path, clone(op.to)); if (JSON.stringify(r) !== was) wrote.add(op.path); }
+          done.add(op.path);
+        }
+        const whole = [...done].some(k => k === 'environments' || splitPath(k).whole !== undefined);
+        const did = k => done.has(k) || done.has(`suggested/${k}`) || (k.startsWith('environments/') && (done.has('environments') || done.has(`environment/${splitPath(k).env}`)));
+        for (const k of marks.filter(did)) {
+          if (kind === 'edit') setPath(r, `edited/${k}`, { by: editorId(), on: today() });
+          if (kind === 'accept') setPath(r, `edited/${k}`, undefined);
+          // a dismissed answer is remembered with the mark, so the review does not offer it again
+          if (kind === 'dismiss' && r.edited?.[k]) r.edited[k] = { ...r.edited[k], dismissed: clone(sop.from.value) };
+          if (kind === 'edit' && r.suggested?.[k] && sameText(r.suggested[k].value, getPath(r, k))) setPath(r, `suggested/${k}`, undefined);
+        }
+        if (whole) {
+          for (const m of ['edited', 'suggested']) for (const k of Object.keys(r[m] || {})) { const s = splitPath(k); if (s.env !== undefined && !envOf(r, s.env)) setPath(r, `${m}/${k}`, undefined); }
+        }
+        if ([...wrote].some(k => !k.startsWith('suggested/'))) r.updatedOn = today();
+        if (JSON.stringify(r) === JSON.stringify(cur)) { toast(unsaved.size ? `Not saved: ${unsavedText()}.` : 'Nothing to save: the project already holds what you chose.', 5000); render(); return !unsaved.size; }
+        list.splice(list.indexOf(cur), 1, r);
+      }
+      const res = await save('projects', { replay: i < 2 });
+      if (res === 'conflict') continue;
+      if (res && (i || unsaved.size)) toast(unsaved.size ? `Saved, except ${unsavedText()}.` : 'Saved, together with the changes made meanwhile.', 5000);
+      return res;
+    }
+  }
+
+  // Accepting hands the field back to the weekly review; dismissing keeps what is there.
+  const LIST_FIELDS = ['keyFacts', 'risks', 'openQuestions', 'nextSteps'];
+  function suggestionFits(key, v) {
+    if (LIST_FIELDS.includes(key)) return Array.isArray(v) && v.every(x => typeof x === 'string');
+    if (key === 'health') return HEALTH.includes(v);
+    if (/^environments\/.+\/status$/.test(key)) return ENV_STATUS.includes(v);
+    return (REVIEWED.includes(key) || /^environments\/.+\/notes$/.test(key)) && typeof v === 'string';
+  }
+  async function settleSuggestion(id, key, accept) {
+    const p = project(id); if (!canEditProject(p)) return;
+    if (!mayChange(p, key)) { toast('Only the team lead settles a suggestion for this field.', 4000); return; }
+    const s = p.suggested?.[key]; if (!s) return;
+    if (accept && !suggestionFits(key, s.value)) { toast('This suggestion does not fit the field, so it cannot be accepted. Dismiss it instead.', 4000); return; }
+    const ops = [{ path: `suggested/${key}`, from: clone(s), to: undefined }];
+    if (accept) ops.unshift({ path: key, from: clone(getPath(p, key)), to: clone(s.value) });
+    await saveProject(id, { base: clone(p), ops, marks: [key], kind: accept ? 'accept' : 'dismiss' });
+    render();
   }
 
   const TRANSLIT = { а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'ie', ж: 'zh', з: 'z', и: 'y', і: 'i', ї: 'i', й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ь: '', ю: 'iu', я: 'ia', ы: 'y', э: 'e', ъ: '', ё: 'e' };
@@ -1139,14 +1461,17 @@
   }
 
   async function deleteProject(id) {
-    const p = project(id); if (!p) return;
+    const p = project(id); if (!p || !canSeeHistory()) return;
     if (!confirm(`Delete project "${p.name}"? Its activity log entries stay.`)) return;
-    projects().splice(projects().indexOf(p), 1); await save('projects');
+    await saveProject(id, { remove: true });
     location.hash = '#/projects'; render();
   }
 
   async function editWorkstream(prId, wsId) {
-    const p = project(prId); const w = wsId ? p.workstreams.find(x => x.id === wsId) : { id: '', status: 'active' };
+    const p = project(prId); if (!canEditProject(p)) return;
+    const w = wsId ? (p.workstreams || []).find(x => x.id === wsId) : { id: '', status: 'active' };
+    if (!w) return;
+    const base = clone(p);
     const v = await form(wsId ? `Edit workstream — ${w.name}` : `New workstream in ${p.name}`, [
       { key: 'name', label: 'Name', required: true },
       { key: 'status', label: 'Status', type: 'select', options: opt(STATUS.concat('unknown')) },
@@ -1156,37 +1481,52 @@
     ], w);
     if (!v) return;
     const nw = { ...w, ...v, id: w.id || uid('ws') };
-    p.workstreams ||= [];
-    if (wsId) p.workstreams.splice(p.workstreams.indexOf(w), 1, nw); else p.workstreams.push(nw);
-    p.updatedOn = today(); await save('projects'); render();
+    await saveProject(prId, { base, ops: [{ path: `workstreams/${nw.id}`, from: wsId ? clone(w) : undefined, to: nw }] });
+    render();
   }
   async function deleteWorkstream(prId, wsId) {
-    const p = project(prId); const w = p.workstreams.find(x => x.id === wsId);
+    const p = project(prId); if (!canEditProject(p)) return;
+    const w = (p.workstreams || []).find(x => x.id === wsId);
     if (!w || !confirm(`Remove workstream "${w.name}"?`)) return;
-    p.workstreams.splice(p.workstreams.indexOf(w), 1); await save('projects'); render();
+    await saveProject(prId, { base: clone(p), ops: [{ path: `workstreams/${wsId}`, from: clone(w), to: undefined }] });
+    render();
   }
 
+  // The GitHub username decides whose thread and learning a token opens, so only the lead sets it,
+  // and never to one that another person already carries. People are added, renamed and removed by
+  // the lead too, since who a person is decides what they may edit; anyone else edits a few lines of
+  // their own profile.
+  const canEditPerson = id => canSeeHistory() || (!!id && id === signedInAs());
   async function editPerson(id) {
+    const lead = canSeeHistory();
+    if (id ? !canEditPerson(id) : !lead) return;
     const p = id ? person(id) : { id: '', role: 'mentee', active: true, track: 'basic' };
+    if (!p) return;
     const learn = !id || canSeeLearningOf(id);
-    const v = await form(id ? `Edit — ${p.name}` : 'Add person', [
-      { key: 'name', label: 'Name', required: true },
-      { key: 'role', label: 'Role', type: 'select', options: opt(ROLES) },
-      { key: 'title', label: 'Title', help: 'e.g. Manual QA, moving to automation' },
-      { key: 'githubLogin', label: 'GitHub username', help: 'When they open the tracker with their own token, everything they post is signed as this person.' },
-      ...(learn ? [{ key: 'track', label: 'Learning track', type: 'select', options: opt(TRACKS), allowEmpty: true, emptyLabel: 'not set' }] : []),
-      { key: 'startedOn', label: 'Started with you on', type: 'date' },
-      ...(learn ? [{ key: 'weeklyLearningHours', label: 'Learning hours per week', type: 'number', step: '0.5' }] : []),
-      { key: 'focus', label: 'Current focus', help: 'What they are on right now, one line. Shows on the dashboard.' },
-      { key: 'active', label: 'Active', type: 'checkbox', text: 'Currently on the team' },
-    ], { active: true, ...p });
-    if (!v) return;
+    let values = { active: true, ...p }, v;
+    for (;;) {
+      v = await form(id ? `Edit — ${p.name}` : 'Add person', [
+        ...(lead ? [{ key: 'name', label: 'Name', required: true }, { key: 'role', label: 'Role', type: 'select', options: opt(ROLES) }] : []),
+        { key: 'title', label: 'Title', help: 'e.g. Manual QA, moving to automation' },
+        ...(lead ? [{ key: 'githubLogin', label: 'GitHub username', help: 'When they open the tracker with their own token, everything they post is signed as this person, and their own thread and learning open to them.' }] : []),
+        ...(learn ? [{ key: 'track', label: 'Learning track', type: 'select', options: opt(TRACKS), allowEmpty: true, emptyLabel: 'not set' }] : []),
+        { key: 'startedOn', label: 'Started with you on', type: 'date' },
+        ...(learn ? [{ key: 'weeklyLearningHours', label: 'Learning hours per week', type: 'number', step: '0.5' }] : []),
+        { key: 'focus', label: 'Current focus', help: 'What they are on right now, one line. Shows on the dashboard.' },
+        ...(lead ? [{ key: 'active', label: 'Active', type: 'checkbox', text: 'Currently on the team' }] : []),
+      ], values);
+      if (!v) return;
+      const taken = lead && loginHolders(v.githubLogin).find(x => x !== p);
+      if (!taken) break;
+      toast(`${taken.name} already carries the GitHub username ${v.githubLogin}`, 4000);
+      values = { ...values, ...v };
+    }
     const np = { ...p, ...v, id: p.id || slug(v.name), updatedOn: today() };
     if (id) people().splice(people().indexOf(p), 1, np); else people().push(np);
     await save('people'); location.hash = `#/people/${np.id}`; render();
   }
   async function deletePerson(id) {
-    const p = person(id); if (!p || !confirm(`Remove ${p.name}? Their learning progress and activity stay in the data files.`)) return;
+    const p = person(id); if (!p || !canSeeHistory() || !confirm(`Remove ${p.name}? Their learning progress and activity stay in the data files.`)) return;
     people().splice(people().indexOf(p), 1); await save('people'); location.hash = '#/people'; render();
   }
 
@@ -1217,8 +1557,9 @@
     a.resolved = !a.resolved; a.resolvedOn = a.resolved ? today() : ''; await save('activities'); render();
   }
 
+  // Enrollments, and the quarter goal on them, are the lead's to set.
   async function enroll(pid, preset = {}) {
-    if (!canSeeLearningOf(pid)) return;
+    if (!canSeeHistory() || !canSeeLearningOf(pid)) return;
     const list = learning().enrollments;
     const editing = preset.courseId ? list.find(e => e.personId === pid && e.courseId === preset.courseId) : null;
     const v = await form(editing ? `Enrollment — ${pname(pid)}` : `Enroll ${pname(pid)}`, [
@@ -1234,7 +1575,7 @@
     await save('learning'); render();
   }
   async function unenroll(pid, courseId) {
-    if (!canSeeLearningOf(pid)) return;
+    if (!canSeeHistory() || !canSeeLearningOf(pid)) return;
     if (!confirm(`Remove ${pname(pid)} from ${course(courseId)?.name}? Lesson marks are kept.`)) return;
     learning().enrollments = learning().enrollments.filter(e => !(e.personId === pid && e.courseId === courseId));
     await save('learning'); render();
@@ -1292,6 +1633,7 @@
   }
 
   async function editSettings() {
+    if (!canSeeHistory()) return;
     const v = await form('Settings', [
       { key: 'teamName', label: 'Team name' },
       { key: 'leadName', label: 'Your name' },
@@ -1325,6 +1667,23 @@
       <div class="ops">${a.type === 'blocker' ? `<button class="btn sm" data-act="resolve" data-id="${a.id}" title="toggle resolved">${a.resolved ? '↺' : '✓'}</button>` : ''}<button class="btn sm" data-act="edit-act" data-id="${a.id}">✎</button><button class="btn sm" data-act="del-act" data-id="${a.id}">🗑</button></div></div>`;
   }
   const listOr = (arr, empty) => arr && arr.length ? `<ul class="plain">${arr.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : `<div class="empty">${esc(empty)}</div>`;
+  // Everyone sees that a field was set by hand; whoever may edit the project also sees what the
+  // weekly review would put there instead, and settles it.
+  function editedNote(p, key, what = '') {
+    const m = p.edited?.[key]; if (!m) return '';
+    return ` <span class="muted small" data-edited="${esc(key)}" title="Set by hand. The weekly review leaves it as it is and suggests instead.">${esc(what ? what + ' ' : '')}edited by ${esc(m.by ? pname(m.by) : 'someone')}${m.on ? ' on ' + esc(m.on) : ''}</span>`;
+  }
+  // A suggestion is shown to whoever may change its field; one that does not fit the field can only be dismissed.
+  const pendingOf = p => canEditProject(p) ? Object.keys(p.suggested || {}).filter(k => mayChange(p, k)) : [];
+  function suggestBox(p, key) {
+    const s = p.suggested?.[key]; if (!s || !pendingOf(p).includes(key)) return '';
+    const b = (act, text, cls) => `<button class="btn sm${cls}" data-act="${act}" data-project="${esc(p.id)}" data-field="${esc(key)}">${text}</button>`;
+    return `<div class="suggest" data-suggest="${esc(key)}" style="margin-top:8px;padding:8px 10px;border:1px solid var(--accent);border-radius:10px;background:var(--accent-soft)">
+      <div class="small"><b>The weekly review suggests${splitPath(key).env !== undefined || !REVIEWED.includes(key) ? ` for ${esc(fieldLabel(key))}` : ''}</b>${s.on ? ` <span class="muted">· ${esc(s.on)}</span>` : ''}</div>
+      <div class="small"><span class="muted">Now:</span> ${fmtVal(key, getPath(p, key))}</div>
+      <div class="small"><span class="muted">Suggested:</span> ${fmtVal(key, s.value)}</div>
+      <div class="actions" style="margin-top:6px">${suggestionFits(key, s.value) ? b('sugg-accept', 'Accept', ' primary') : '<span class="hint">It does not fit this field, so it can only be dismissed.</span>'}${b('sugg-dismiss', 'Dismiss', '')}</div></div>`;
+  }
 
   // ---------- views
   function vDashboard() {
@@ -1381,7 +1740,7 @@
   function vProjects() {
     const f = S.filter?.status || '';
     const list = projects().filter(p => !f || p.status === f);
-    return `<div class="page-head"><div><h1>Projects</h1><div class="sub">${projects().length} total</div></div><div class="actions"><button class="btn primary" data-act="new-project">New project</button></div></div>
+    return `<div class="page-head"><div><h1>Projects</h1><div class="sub">${projects().length} total</div></div><div class="actions">${canSeeHistory() ? '<button class="btn primary" data-act="new-project">New project</button>' : ''}</div></div>
       <div class="filters"><select data-filter="status"><option value="">all statuses</option>${STATUS.map(s => `<option value="${s}"${f === s ? ' selected' : ''}>${label(s)}</option>`).join('')}</select></div>
       <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Status</th><th>Health</th><th>Lead</th><th>Team</th><th>Next milestone</th>${canSeeHistory() ? '<th>Last activity</th>' : ''}</tr></thead><tbody>
       ${list.map(p => { const la = projectActs(p.id)[0]; return `<tr><td>${prlink(p.id)}<div class="muted small">${esc(p.code || '')}${p.client ? ' · ' + esc(p.client) : ''}</div></td><td>${pill(p.status)}</td><td>${dot(p.health)} <span class="small">${esc(trunc(p.healthReason, 60))}</span></td><td>${p.leadId ? plink(p.leadId) : '<span class="muted">—</span>'}</td><td class="small">${(p.memberIds || []).map(pname).map(esc).join(', ') || '<span class="muted">—</span>'}</td><td class="small">${p.nextMilestone?.text ? esc(p.nextMilestone.text) + (p.nextMilestone.due ? ` <span class="${p.nextMilestone.due < today() ? 'pill red' : 'muted'}">${esc(p.nextMilestone.due)}</span>` : '') : '<span class="muted">—</span>'}</td>${canSeeHistory() ? `<td class="small">${la ? esc(ago(la.date)) : '<span class="muted">—</span>'}</td>` : ''}</tr>`; }).join('') || `<tr><td colspan="${canSeeHistory() ? 7 : 6}" class="empty">No projects match.</td></tr>`}
@@ -1396,7 +1755,8 @@
       ['Members', (p.memberIds || []).map(plink).join(', ')],
       ['Started', esc(p.startedOn)], ['Stack', (p.stack || []).map(esc).join(', ')], ['Aliases', (p.aliases || []).map(esc).join(', ')],
       ['Repositories', (p.repos || []).map(r => `${link(r.url, r.name)}${r.branch ? ` <span class="muted small">(${esc(r.branch)})</span>` : ''}${r.localPath ? `<div class="mono muted small">${esc(r.localPath)}</div>` : ''}`).join('<br>')],
-      ['Environments', (p.environments || []).map(e => `${link(e.url, e.name)} ${envPill(e)}${e.notes ? ` <span class="muted small">— ${esc(e.notes)}</span>` : ''}`).join('<br>')],
+      ['Environments', (p.environments || []).map(e => { const k = `environments/${e.name}/`;
+        return `${link(e.url, e.name)} ${envPill(e)}${e.notes ? ` <span class="muted small">— ${esc(e.notes)}</span>` : ''}${editedNote(p, k + 'notes', 'notes')}${editedNote(p, k + 'status', 'status')}${suggestBox(p, k + 'notes')}${suggestBox(p, k + 'status')}`; }).join('<br>')],
       ['Systems', (p.systems || []).map(s => `${link(s.url, s.name)}${s.role ? ` <span class="muted small">— ${esc(s.role)}</span>` : ''}`).join('<br>')],
       ['Local docs', (p.localDocs || []).map(d => `<span class="mono small">${esc(d.path)}</span> <span class="muted small">— ${esc(d.what)}</span>`).join('<br>')],
       ['Updated', esc(p.updatedOn)],
@@ -1411,23 +1771,29 @@
           ? `rebuilt from ${seen.length} live source${seen.length > 1 ? 's' : ''}`
           : 'written by hand'} ${esc(ago(p.updatedOn))}</span>`
       : '';
-    const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}${written}</div>${verdict}</div>
-      <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button>` : ''}<button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button></div></div>`;
+    const edit = canEditProject(p), pending = pendingOf(p), nSug = pending.length;
+    const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}${nSug ? ' ' + pill('purple', `${nSug} suggested`) : ''}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}${written}</div>${verdict}</div>
+      <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button>` : ''}${edit ? `<button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button>` : ''}${canSeeHistory() ? `<button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button>` : ''}</div></div>`;
+    const hand = ['health', 'healthReason'].some(k => p.edited?.[k] || (edit && p.suggested?.[k]));
+    const health = hand ? `<div class="card" style="margin-bottom:14px"><h3>Health</h3><div>${dot(p.health)} ${esc(label(p.health))}${editedNote(p, 'health')}</div>${p.healthReason ? `<div class="small">${esc(p.healthReason)}${editedNote(p, 'healthReason')}</div>` : ''}${suggestBox(p, 'health')}${suggestBox(p, 'healthReason')}</div>` : '';
+    const stray = pending.filter(k => !reviewKeys(p).includes(k));
+    const strays = stray.length ? `<div class="card" style="margin-bottom:14px"><h3>Suggestions for fields the weekly review does not write</h3>${stray.map(k => suggestBox(p, k)).join('')}</div>` : '';
+    const listCard = (key, title, empty, last) => `<div class="card"${last ? '' : ' style="margin-bottom:14px"'}><h3>${esc(title)}${editedNote(p, key)}</h3>${listOr(p[key], empty)}${suggestBox(p, key)}</div>`;
     if (tab === 'ci') return head + tabs + (src ? latestReports(p, src) : '') + waitsBox(id) + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
     if (tab === 'tests') return head + tabs + vProjectTests(p);
-    return head + tabs + `${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}
+    return head + tabs + `${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}${health}${strays}
       <div class="grid cols-2">
-        <div class="card"><h3>Overview</h3><p>${esc(p.summary || '')}</p><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>${p.notes ? `<h3 style="margin-top:12px">Notes</h3><p class="small" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}</div>
+        <div class="card"><h3>Overview</h3><p>${esc(p.summary || '')}${editedNote(p, 'summary')}</p>${suggestBox(p, 'summary')}<dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>${p.notes ? `<h3 style="margin-top:12px">Notes</h3><p class="small" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}</div>
         <div>
-          <div class="card" style="margin-bottom:14px"><h3>Key facts</h3>${listOr(p.keyFacts, 'none recorded')}</div>
-          <div class="card" style="margin-bottom:14px"><h3>Risks</h3>${listOr(p.risks, 'none recorded')}</div>
-          <div class="card" style="margin-bottom:14px"><h3>Open questions</h3>${listOr(p.openQuestions, 'none')}</div>
-          <div class="card"><h3>Next steps</h3>${listOr(p.nextSteps, 'none')}</div>
+          ${listCard('keyFacts', 'Key facts', 'none recorded')}
+          ${listCard('risks', 'Risks', 'none recorded')}
+          ${listCard('openQuestions', 'Open questions', 'none')}
+          ${listCard('nextSteps', 'Next steps', 'none', true)}
         </div>
       </div>
-      <div class="section" style="margin-top:14px"><div class="section-head"><h2>Workstreams</h2><button class="btn sm" data-act="new-ws" data-project="${esc(id)}">Add workstream</button></div>
+      <div class="section" style="margin-top:14px"><div class="section-head"><h2>Workstreams</h2>${edit ? `<button class="btn sm" data-act="new-ws" data-project="${esc(id)}">Add workstream</button>` : ''}</div>
         <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Workstream</th><th>Status</th><th>Owner</th><th>Summary</th><th>Next</th><th></th></tr></thead><tbody>
-        ${(p.workstreams || []).map(w => `<tr><td><b>${esc(w.name)}</b></td><td>${pill(w.status)}</td><td>${w.ownerId ? plink(w.ownerId) : '<span class="muted">—</span>'}</td><td class="small">${esc(w.summary || '')}</td><td class="small">${esc(w.next || '')}</td><td class="nowrap"><button class="btn sm" data-act="edit-ws" data-project="${esc(id)}" data-id="${esc(w.id)}">✎</button> <button class="btn sm" data-act="del-ws" data-project="${esc(id)}" data-id="${esc(w.id)}">🗑</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">No workstreams yet.</td></tr>'}
+        ${(p.workstreams || []).map(w => `<tr><td><b>${esc(w.name)}</b></td><td>${pill(w.status)}</td><td>${w.ownerId ? plink(w.ownerId) : '<span class="muted">—</span>'}</td><td class="small">${esc(w.summary || '')}</td><td class="small">${esc(w.next || '')}</td><td class="nowrap">${edit ? `<button class="btn sm" data-act="edit-ws" data-project="${esc(id)}" data-id="${esc(w.id)}">✎</button> <button class="btn sm" data-act="del-ws" data-project="${esc(id)}" data-id="${esc(w.id)}">🗑</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">No workstreams yet.</td></tr>'}
         </tbody></table></div></div>
       ${canSeeHistory() ? `<div class="section"><div class="section-head"><h2>Activity${bl.length ? ` · <span class="pill blocker">${bl.length} open blocker${bl.length === 1 ? '' : 's'}</span>` : ''}</h2></div>
         <div class="card">${pa.length ? pa.map(a => actRow(a, { showProject: false })).join('') : '<div class="empty">Nothing logged for this project yet.</div>'}</div></div>` : ''}`;
@@ -1641,15 +2007,15 @@
   }
 
   function vPeople() {
-    return `<div class="page-head"><div><h1>People</h1><div class="sub">${mentees().length} mentee${mentees().length === 1 ? '' : 's'} · ${people().length} total</div></div><div class="actions"><button class="btn primary" data-act="new-person">Add person</button></div></div>
+    return `<div class="page-head"><div><h1>People</h1><div class="sub">${mentees().length} mentee${mentees().length === 1 ? '' : 's'} · ${people().length} total</div></div><div class="actions">${canSeeHistory() ? '<button class="btn primary" data-act="new-person">Add person</button>' : ''}</div></div>
       <div class="grid auto">${people().slice().sort((a, b) => (a.active === false) - (b.active === false) || (a.role === 'mentee' ? 0 : 1) - (b.role === 'mentee' ? 0 : 1)).map(p => {
-        const o = lastOneOnOne(p.id), prs = personProjects(p.id);
+        const o = lastOneOnOne(p.id), prs = personProjects(p.id), nq = canSeeThreadOf(p.id) ? openAsks(p.id).length : 0;
         const lr = canSeeLearningOf(p.id) ? enrollmentsOf(p.id).map(e => courseSummary(p.id, e.courseId)).filter(Boolean) : [];
         return `<div class="card clickable" data-href="#/people/${esc(p.id)}"><h3><a href="#/people/${esc(p.id)}">${esc(p.name)}</a> ${p.active === false ? pill('grey', 'inactive') : ''}${p.role !== 'mentee' ? pill('accent', label(p.role)) : ''}${p.track && canSeeLearningOf(p.id) ? pill('purple', p.track) : ''}</h3>
           <div class="meta">${esc(p.title || '')}${p.startedOn ? ` · since ${esc(p.startedOn)}` : ''}</div>
           ${p.focus ? `<p class="small" style="margin-top:6px"><span class="muted">Focus:</span> ${esc(p.focus)}</p>` : ''}
           <div class="small"><span class="muted">Projects:</span> ${prs.map(x => esc(x.name)).join(', ') || '—'}</div>
-          <div class="small">${canSeeHistory() ? `<span class="muted">Last 1:1:</span> ${o ? esc(ago(o.date)) : 'never'}${openAsks(p.id).length ? ' · ' : ''}` : ''}${openAsks(p.id).length ? pill('yellow', openAsks(p.id).length + ' open') : ''}</div>
+          <div class="small">${canSeeHistory() ? `<span class="muted">Last 1:1:</span> ${o ? esc(ago(o.date)) : 'never'}${nq ? ' · ' : ''}` : ''}${nq ? pill('yellow', nq + ' open') : ''}</div>
           ${lr.map(cs => `<div class="small" style="margin-top:6px"><b>${cs.pct}%</b> ${esc(cs.course.name)}${cs.current ? ` · <span class="muted">${esc(cs.current.title)}</span>` : ''}</div>${progressBar(cs)}`).join('')}
         </div>`;
       }).join('') || '<div class="empty">No people yet.</div>'}</div>`;
@@ -1674,8 +2040,9 @@
   function learningBlock(id, e) {
     const cs = courseSummary(id, e.courseId); if (!cs) return '';
     const c = cs.course;
-    return `<div class="card" style="margin-bottom:14px"><div class="section-head"><h3>${esc(c.name)} ${e.track ? pill('purple', e.track) : ''}</h3><div class="actions"><a class="btn sm" href="#/learning/${esc(c.id)}">matrix</a><button class="btn sm" data-act="edit-enroll" data-person="${esc(id)}" data-course="${esc(c.id)}">edit</button><button class="btn sm" data-act="unenroll" data-person="${esc(id)}" data-course="${esc(c.id)}">remove</button></div></div>
-      <div class="small muted">${e.startedOn ? `since ${esc(e.startedOn)} \u00b7 ` : ''}${cs.complete}/${cs.total} lessons \u00b7 ${cs.counts['gate-passed']} gates \u00b7 last mark ${esc(ago(cs.lastDate))}${e.goal ? ` \u00b7 goal: ${esc(e.goal)}` : ''}</div>
+    return `<div class="card" style="margin-bottom:14px"><div class="section-head"><h3>${esc(c.name)} ${e.track ? pill('purple', e.track) : ''}</h3><div class="actions"><a class="btn sm" href="#/learning/${esc(c.id)}">matrix</a>${canSeeHistory() ? `<button class="btn sm" data-act="edit-enroll" data-person="${esc(id)}" data-course="${esc(c.id)}">edit</button><button class="btn sm" data-act="unenroll" data-person="${esc(id)}" data-course="${esc(c.id)}">remove</button>` : ''}</div></div>
+      <div class="small muted">${e.startedOn ? `since ${esc(e.startedOn)} \u00b7 ` : ''}${cs.complete}/${cs.total} lessons \u00b7 ${cs.counts['gate-passed']} gates \u00b7 last mark ${esc(ago(cs.lastDate))}</div>
+      ${e.goal ? `<div class="small"><span class="muted">Quarter goal:</span> ${esc(e.goal)}</div>` : ''}
       <div style="margin:6px 0 10px">${progressBar(cs)}</div>
       ${cs.current ? `<div class="small" style="margin-bottom:8px"><span class="muted">Now on:</span> <b>${esc(cs.current.title)}</b> <span class="muted">(${esc(cs.current.phaseName)})</span></div>` : '<div class="small" style="margin-bottom:8px">Course complete.</div>'}
       ${(c.phases || []).map(ph => { const ls = ph.lessons || []; const done = ls.filter(l => ['done', 'gate-passed'].includes(progressOf(id, l.id).status)).length;
@@ -1687,35 +2054,36 @@
   function vPersonLearning(p) {
     if (!canSeeLearningOf(p.id)) return '<div class="card"><div class="empty">Learning progress is visible only to the person and the lead.</div></div>';
     const enr = enrollmentsOf(p.id);
-    if (!enr.length) return `<div class="card"><div class="empty">Not enrolled in any course yet. Use \u201cEnroll in course\u201d above.</div></div>`;
+    if (!enr.length) return `<div class="card"><div class="empty">${canSeeHistory() ? 'Not enrolled in any course yet. Use \u201cEnroll in course\u201d above.' : 'Not enrolled in any course yet. The lead does the enrolling.'}</div></div>`;
     return enr.map(e => learningBlock(p.id, e)).join('');
   }
 
   function vPersonThread(p) {
+    if (!canSeeThreadOf(p.id)) return '';
     const thread = threadOf(p.id), me = viewerId();
     const bubble = m => `<div class="row"><div class="body">
         <div class="small"><b>${esc(m.authorId ? pname(m.authorId) : 'someone')}</b> <span class="muted">${esc(fmtWhen(m.at))}</span> ${m.question ? (m.resolved ? pill('green', 'answered') : pill('yellow', 'open question')) : ''}${m.authorId === me ? ' ' + pill('accent', 'you') : ''}</div>
         <div class="txt">${esc(m.text)}</div>
         ${m.resolved && m.resolvedBy ? `<div class="muted small">answered by ${esc(pname(m.resolvedBy))}${m.resolvedAt ? ' \u00b7 ' + esc(fmtWhen(m.resolvedAt)) : ''}</div>` : ''}
-      </div><div class="ops">${m.question ? `<button class="btn sm" data-act="answer-msg" data-id="${esc(m.id)}" title="${m.resolved ? 'reopen' : 'mark answered'}">${m.resolved ? 'reopen' : 'answered'}</button>` : ''}<button class="btn sm" data-act="del-msg" data-id="${esc(m.id)}">remove</button></div></div>`;
+      </div><div class="ops">${m.question ? `<button class="btn sm" data-act="answer-msg" data-id="${esc(m.id)}" title="${m.resolved ? 'reopen' : 'mark answered'}">${m.resolved ? 'reopen' : 'answered'}</button>` : ''}${mayRemoveMessage(m) ? `<button class="btn sm" data-act="del-msg" data-id="${esc(m.id)}">remove</button>` : ''}</div></div>`;
     return `<div class="card"><div class="section-head"><h3>Questions and notes</h3>
         <div class="actions"><button class="btn primary" data-act="ask" data-person="${esc(p.id)}">Ask a question</button><button class="btn" data-act="note" data-person="${esc(p.id)}">Leave a note</button></div></div>
-      <p class="hint">${me ? `Posting as <b>${esc(viewerName())}</b>. <a href="#" data-act="who">Change</a>` : '<a href="#" data-act="who">Say who you are</a> before posting.'}</p>
+      <p class="hint">Only ${esc(threadReaders(p.id))} can read this thread. ${me ? `Posting as <b>${esc(viewerName())}</b>. <a href="#" data-act="who">Change</a>` : '<a href="#" data-act="who">Say who you are</a> before posting.'}</p>
       ${thread.length ? thread.map(bubble).join('') : '<div class="empty">Nothing here yet. Ask the first question.</div>'}</div>`;
   }
 
   function vPerson(id) {
     const p = person(id); if (!p) return `<div class="empty">Person not found. <a href="#/people">Back</a></div>`;
     const pa = personActs(id), ones = pa.filter(a => a.type === 'one-on-one'), others = pa.filter(a => a.type !== 'one-on-one');
-    const seeL = canSeeLearningOf(id), prs = personProjects(id), enr = seeL ? enrollmentsOf(id) : [], nq = openAsks(id).length;
+    const seeL = canSeeLearningOf(id), seeT = canSeeThreadOf(id), prs = personProjects(id), enr = seeL ? enrollmentsOf(id) : [], nq = seeT ? openAsks(id).length : 0;
     const kv = [['Role', label(p.role)], ['Title', p.title], ['GitHub', p.githubLogin], ['Track', seeL && p.track ? label(p.track) : ''], ['Started', p.startedOn], ['Learning h/week', seeL ? p.weeklyLearningHours : ''], ['Focus', p.focus]].filter(([, v]) => v !== undefined && v !== null && v !== '');
-    const tab = S.route.tab === 'questions' || (S.route.tab === 'learning' && seeL) ? S.route.tab : '';
+    const tab = (S.route.tab === 'questions' && seeT) || (S.route.tab === 'learning' && seeL) ? S.route.tab : '';
     const head = `<div class="page-head"><div><h1>${esc(p.name)} ${p.active === false ? pill('grey', 'inactive') : ''}${viewerId() === id ? ' ' + pill('accent', 'you') : ''}</h1><div class="sub">${esc(p.title || label(p.role))}</div></div>
-      <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-11" data-person="${esc(id)}">Log 1:1</button><button class="btn" data-act="log-act" data-person="${esc(id)}">Log activity</button>` : ''}${seeL ? `<button class="btn" data-act="enroll" data-person="${esc(id)}">Enroll in course</button>` : ''}<button class="btn primary" data-act="edit-person" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-person" data-id="${esc(id)}">Remove</button></div></div>
+      <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-11" data-person="${esc(id)}">Log 1:1</button><button class="btn" data-act="log-act" data-person="${esc(id)}">Log activity</button><button class="btn" data-act="enroll" data-person="${esc(id)}">Enroll in course</button>` : ''}${canEditPerson(id) ? `<button class="btn primary" data-act="edit-person" data-id="${esc(id)}">Edit</button>` : ''}${canSeeHistory() ? `<button class="btn danger ghost" data-act="del-person" data-id="${esc(id)}">Remove</button>` : ''}</div></div>
       <div class="tabs">
         <button class="${tab ? '' : 'active'}" data-href="#/people/${esc(id)}">Profile</button>
         ${seeL ? `<button class="${tab === 'learning' ? 'active' : ''}" data-href="#/people/${esc(id)}/learning">Learning${enr.length ? ` <span class="pill">${enr.length}</span>` : ''}</button>` : ''}
-        <button class="${tab === 'questions' ? 'active' : ''}" data-href="#/people/${esc(id)}/questions">Questions${nq ? ` <span class="pill yellow">${nq} open</span>` : threadOf(id).length ? ` <span class="pill">${threadOf(id).length}</span>` : ''}</button>
+        ${seeT ? `<button class="${tab === 'questions' ? 'active' : ''}" data-href="#/people/${esc(id)}/questions">Questions${nq ? ` <span class="pill yellow">${nq} open</span>` : threadOf(id).length ? ` <span class="pill">${threadOf(id).length}</span>` : ''}</button>` : ''}
       </div>`;
 
     if (tab === 'learning') return head + vPersonLearning(p);
@@ -1727,7 +2095,7 @@
           <div class="card" style="margin-bottom:14px"><h3>Projects</h3>${prs.length ? `<ul class="plain">${prs.map(pr => `<li>${prlink(pr.id)} <span class="muted small">\u2014 ${esc(personRoleIn(pr, id))}</span> ${dot(pr.health)} ${pill(pr.status)}</li>`).join('')}</ul>` : '<div class="empty">Not assigned to any project. Set them as lead or member in the project.</div>'}</div>
           ${canSeeHistory() ? `<div class="card"><div class="section-head"><h3>1:1 journal</h3><span class="hint">${ones.length} entries</span></div>${ones.length ? ones.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">No 1:1 logged yet.</div>'}</div>` : ''}</div>
         <div>${seeL ? `<div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Learning</h3><a class="btn sm" href="#/people/${esc(id)}/learning">open</a></div>${summary || '<div class="empty">Not enrolled in any course.</div>'}</div>` : ''}
-          <div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Questions</h3><a class="btn sm" href="#/people/${esc(id)}/questions">open</a></div>${nq ? openAsks(id).slice(0, 3).map(m => `<div class="row"><div class="body"><div class="txt small">${esc(trunc(m.text, 120))}</div><div class="muted small">${esc(pname(m.authorId))} \u00b7 ${esc(fmtWhen(m.at))}</div></div></div>`).join('') : `<div class="empty">${threadOf(id).length ? 'No open questions.' : 'Nothing asked yet.'}</div>`}</div>
+          ${seeT ? `<div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Questions</h3><a class="btn sm" href="#/people/${esc(id)}/questions">open</a></div>${nq ? openAsks(id).slice(0, 3).map(m => `<div class="row"><div class="body"><div class="txt small">${esc(trunc(m.text, 120))}</div><div class="muted small">${esc(pname(m.authorId))} \u00b7 ${esc(fmtWhen(m.at))}</div></div></div>`).join('') : `<div class="empty">${threadOf(id).length ? 'No open questions.' : 'Nothing asked yet.'}</div>`}</div>` : ''}
           ${canSeeHistory() ? `<div class="card"><div class="section-head"><h3>Other activity</h3></div>${others.length ? others.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">Nothing logged.</div>'}</div>` : ''}</div>
       </div>`;
   }
@@ -1742,7 +2110,7 @@
     const cols = (c.phases || []).map(ph => `<th colspan="${(ph.lessons || []).length}" title="${esc(ph.name)}${ph.weeks ? ' · ' + esc(ph.weeks) : ''}">${esc(ph.name)}</th>`).join('');
     const rows = enrolled.map(p => { const sm = courseSummary(p.id, c.id); return `<tr><th class="person">${plink(p.id)}<div class="muted" style="font-weight:400">${sm.pct}% · ${sm.complete}/${sm.total}</div></th>${ls.map(l => { const pr = progressOf(p.id, l.id); return `<td class="cell ${pr.status}${sm.current?.id === l.id ? ' current' : ''}" data-person="${esc(p.id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="${esc(l.title)} — ${label(pr.status)}${pr.date ? ' · ' + esc(pr.date) : ''}${pr.note ? '&#10;' + esc(pr.note) : ''}">${LESSON_GLYPH[pr.status] || ''}</td>`; }).join('')}</tr>`; }).join('');
     return `<div class="page-head"><div><h1>Learning</h1><div class="sub">${cs.length} course${cs.length === 1 ? '' : 's'} · tap a cell to advance its status; right-click, shift-click or long-press to set a note or date${canSeeHistory() ? '' : ' · only your own progress is shown'}</div></div>
-      <div class="actions"><button class="btn primary" data-act="enroll-any" data-course="${esc(c.id)}">Enroll someone</button></div></div>
+      <div class="actions">${canSeeHistory() ? `<button class="btn primary" data-act="enroll-any" data-course="${esc(c.id)}">Enroll someone</button>` : ''}</div></div>
       <div class="tabs">${cs.map(x => `<button class="${x.id === c.id ? 'active' : ''}" data-href="#/learning/${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>
       <div class="card" style="margin-bottom:14px"><h3>${esc(c.name)} <span class="pill">${esc(c.audience || '')}</span></h3><p class="small">${esc(c.description || '')}</p>
         <dl class="kv"><dt>Where</dt><dd class="mono small">${esc(c.path || '')}</dd><dt>Lessons</dt><dd>${ls.filter(counted).length}${ls.length > ls.filter(counted).length ? ` + ${ls.length - ls.filter(counted).length} extra (supplements, practicum)` : ''} in ${(c.phases || []).length} phases</dd>${c.language ? `<dt>Language</dt><dd>${esc(c.language)}</dd>` : ''}</dl>
@@ -1780,28 +2148,28 @@
 
   function vData() {
     const st = settings();
-    const counts = COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => { const d = S.data[c]; const n = Array.isArray(d) ? d.length : c === 'curriculum' ? d.courses.length + ' courses' : c === 'learning' ? (l => `${l.enrollments.length} enrollments, ${Object.keys(l.progress).length} marks${canSeeHistory() ? '' : ' (yours)'}`)(visibleLearning()) : '—'; return `<tr><td class="mono">${c}.json</td><td>${esc(String(n))}</td></tr>`; }).join('');
+    const counts = COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => { const d = S.data[c]; const n = c === 'messages' ? `${visibleMessages().length}${canSeeHistory() ? '' : ' (your thread)'}` : Array.isArray(d) ? d.length : c === 'curriculum' ? courses().length + ' courses' : c === 'learning' ? (l => `${l.enrollments.length} enrollments, ${Object.keys(l.progress).length} marks${canSeeHistory() ? '' : ' (yours)'}`)(visibleLearning()) : '—'; return `<tr><td class="mono">${c}.json</td><td>${esc(String(n))}</td></tr>`; }).join('');
     const theme = localStorage.getItem(LS + 'theme') || 'auto';
     const g = ghConfig();
     const sub = S.backend === 'server' ? `Server on — writing to <span class="mono">${esc(S.dataDir)}</span>` : S.backend === 'github' ? `Connected to GitHub — every save is a commit to <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span>` : 'Not connected — edits stay in this browser until you export';
     const ghCard = S.server ? '' : `<div class="card" style="margin-bottom:14px"><h3>GitHub backend</h3>
         ${S.backend === 'github' ? `<p class="small">Reading and writing <span class="mono">data/*.json</span> in <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span> on branch <span class="mono">${esc(g.branch)}</span> with the token stored in this browser.${S.ghError ? ` <span class="pill red">last read failed: ${esc(S.ghError)}</span>` : ''}</p>
-          <p class="small">${S.privateOk ? `The activity log is being read from <span class="mono">${esc(g.owner)}/${esc(g.privateRepo)}</span>.` : 'This token reaches no activity log, so none is shown. That is the normal state for everyone but the lead.'}</p>
+          <p class="small">${S.privateOk ? `The activity log is being read from <span class="mono">${esc(g.owner)}/${esc(LOG_REPO)}</span>.` : 'This token reaches no activity log, so none is shown. That is the normal state for everyone but the lead.'}</p>
           <p class="small">${S.restoredToken
             ? 'The connection was taken back from the browser\u2019s password manager on this visit.'
             : 'The connection is kept in this browser\u2019s site data' + (passwordStoreWorks() ? ', and in its password manager when the browser is allowed to save passwords' : '') + '.'}
             If you have to connect again every time the browser closes, the browser deletes site data on close: in Chrome open <span class="mono">chrome://settings/content/siteData</span> and add <span class="mono">${esc(location.origin)}</span> under \u201cAllowed to save data on your device\u201d.</p>
-          <p class="small">${S.ghUser ? (personByLogin(S.ghUser) ? `Signed in as <b>${esc(S.ghUser)}</b>, recognised as <b>${esc(viewerName())}</b> — everything you post is signed that way.` : `Signed in as <b>${esc(S.ghUser)}</b>, but no person on the team carries that GitHub username. Put it on their profile so their posts are signed automatically.`) : 'This token does not say who owns it, so posts are signed with the name picked in the menu, and no learning progress is shown.'}</p><div class="actions"><button class="btn" data-act="gh-connect">Change connection</button><button class="btn danger" data-act="gh-disconnect">Forget token</button></div>`
+          <p class="small">${S.ghUser ? (S.me ? `Signed in as <b>${esc(S.ghUser)}</b>, recognised as <b>${esc(viewerName())}</b> — everything you post is signed that way.` : loginHolders(S.ghUser).length > 1 ? `Signed in as <b>${esc(S.ghUser)}</b>, but more than one person on the team carries that GitHub username, so it is taken for none of them. The lead has to leave it on one profile only.` : `Signed in as <b>${esc(S.ghUser)}</b>, but no person on the team carries that GitHub username. The lead puts it on their profile so their posts are signed automatically.`) : 'This token does not say who owns it, so posts are signed with the name picked in the menu, and no learning progress is shown.'}</p><div class="actions"><button class="btn" data-act="gh-connect">Change connection</button><button class="btn danger" data-act="gh-disconnect">Forget token</button></div>`
         : `<p class="small">This page holds no data. Connect it to the private repository that does: create a personal access token on GitHub (Settings → Developer settings) and paste it here. If you were invited to the repository, it has to be a <b>classic</b> token with the <b>repo</b> scope: GitHub does not let fine-grained tokens reach another person\u2019s repositories. The owner can use a fine-grained token with <b>Contents</b> and <b>Actions: read and write</b>. It is kept in this browser only and sent only to api.github.com. If the browser deletes site data on close, allow this site to keep it (in Chrome: <span class="mono">chrome://settings/content/siteData</span>, \u201cAllowed to save data on your device\u201d), or you will have to connect again after every close.</p>
           ${storageWorks() ? '' : '<div class="banner">This browser is not keeping site data, so a connection cannot be remembered here. That is what a private window or a “block site data” setting does. Open the page in a normal window.</div>'}
           ${S.ghError ? `<div class="banner">GitHub answered: ${esc(S.ghError)}</div>` : ''}<div class="actions"><button class="btn primary" data-act="gh-connect">Connect to GitHub</button></div>`}
       </div>`;
-    return `<div class="page-head"><div><h1>Data & settings</h1><div class="sub">${sub}</div></div><div class="actions"><button class="btn primary" data-act="settings">Edit settings</button></div></div>
+    return `<div class="page-head"><div><h1>Data & settings</h1><div class="sub">${sub}</div></div><div class="actions">${canSeeHistory() ? '<button class="btn primary" data-act="settings">Edit settings</button>' : ''}</div></div>
       ${ghCard}
       <div class="grid cols-2">
         <div class="card"><h3>Storage</h3><table class="tbl"><thead><tr><th>Collection</th><th>Contents</th></tr></thead><tbody>${counts}</tbody></table>
-          <div class="actions" style="margin-top:12px"><button class="btn" data-act="export">Export all (JSON)</button><label class="btn">Import JSON <input type="file" accept="application/json" data-act="import" hidden></label>${S.localOverride ? '<button class="btn danger" data-act="clear-local">Discard browser-only edits</button>' : ''}</div>
-          <p class="hint" style="margin-top:8px">Import replaces the collections present in the file. Through the local server a backup of each file is kept as <span class="mono">*.json.bak</span>; through GitHub every save is a commit, so history is in git.</p></div>
+          <div class="actions" style="margin-top:12px"><button class="btn" data-act="export">Export all (JSON)</button>${canSeeHistory() ? '<label class="btn">Import JSON <input type="file" accept="application/json" data-act="import" hidden></label>' : ''}${S.localOverride ? '<button class="btn danger" data-act="clear-local">Discard browser-only edits</button>' : ''}</div>
+          <p class="hint" style="margin-top:8px">${canSeeHistory() ? 'Import replaces the collections present in the file, except the CI snapshot, which only the collector writes. ' : 'The export holds what this page shows you. Importing is the lead’s. '}Through the local server a backup of each file is kept as <span class="mono">*.json.bak</span>; through GitHub every save is a commit, so history is in git.</p></div>
         <div class="card"><h3>Settings</h3><dl class="kv"><dt>Team</dt><dd>${esc(st.teamName)}</dd><dt>Lead</dt><dd>${esc(st.leadName || '—')}</dd><dt>Stale learning</dt><dd>${esc(st.staleLearningDays)} days without a mark</dd></dl>
           <h3 style="margin-top:14px">Theme</h3><div class="actions">${['auto', 'light', 'dark'].map(t => `<button class="btn sm ${theme === t ? 'primary' : ''}" data-theme-set="${t}">${label(t)}</button>`).join('')}</div>
           <h3 style="margin-top:14px">How this works</h3><ul class="plain small"><li><b>Projects</b> hold status, health, lead, workstreams, milestones and facts.</li><li><b>People</b> are your mentees; each project's lead is one of them.</li>${canSeeHistory() ? '<li><b>Activity</b> is the log: updates, blockers, decisions, 1:1s. It feeds “needs attention”.</li>' : ''}<li><b>Learning</b> tracks each person per lesson across the courses you handed out; gates are the checkpoints.</li><li>Everything is plain JSON in <span class="mono">data/</span>, versioned in git. Commit when you want a snapshot.</li></ul></div>
@@ -2166,17 +2534,20 @@
       case 'new-ws': return editWorkstream(d.project, null);
       case 'edit-ws': return editWorkstream(d.project, d.id);
       case 'del-ws': return deleteWorkstream(d.project, d.id);
+      case 'sugg-accept': return settleSuggestion(d.project, d.field, true);
+      case 'sugg-dismiss': return settleSuggestion(d.project, d.field, false);
       case 'new-person': return editPerson(null);
       case 'edit-person': return editPerson(d.id);
       case 'del-person': return deletePerson(d.id);
       case 'enroll': return enroll(d.person);
       case 'enroll-any': {
+        if (!canSeeHistory()) return;
         const who = peopleOpts().filter(o => canSeeLearningOf(o.value));
         if (!who.length) { toast(learningLock(), 5000); return; }
         const v = await form('Enroll someone', [{ key: 'personId', label: 'Person', type: 'select', options: who }]);
         if (v && v.personId) return enroll(v.personId, { courseId: d.course }); return;
       }
-      case 'edit-enroll': { if (!canSeeLearningOf(d.person)) return; const e = learning().enrollments.find(x => x.personId === d.person && x.courseId === d.course); return enroll(d.person, e || { courseId: d.course }); }
+      case 'edit-enroll': { if (!canSeeHistory() || !canSeeLearningOf(d.person)) return; const e = learning().enrollments.find(x => x.personId === d.person && x.courseId === d.course); return enroll(d.person, e || { courseId: d.course }); }
       case 'unenroll': return unenroll(d.person, d.course);
       case 'edit-lesson': return editLesson(d.person, d.lesson, d.title);
       case 'settings': return editSettings();
@@ -2198,18 +2569,37 @@
     }
   });
 
+  // What the page does not show someone stays out of their export too.
+  const LEARNING_FIELDS = ['track', 'weeklyLearningHours'];
+  const visiblePeople = () => canSeeHistory() ? people() : people().map(p => canSeeLearningOf(p.id) ? p : Object.fromEntries(Object.entries(p).filter(([k]) => !LEARNING_FIELDS.includes(k))));
+  const visibleCurriculum = () => ({ ...S.data.curriculum, courses: courses() });
+  // Pending suggestions, and the answers dismissed kept with the marks, go to whoever may settle them.
+  const visibleProjects = () => projects().map(p => {
+    if (canSeeHistory() || (!p.suggested && !p.edited)) return p;
+    const { suggested, edited, ...rest } = p, keep = pendingOf(p);
+    const s = Object.fromEntries(Object.entries(suggested || {}).filter(([k]) => keep.includes(k)));
+    const e = edited && Object.fromEntries(Object.entries(edited).map(([k, m]) => [k, canEditProject(p) || !m || typeof m !== 'object' ? m : (({ dismissed, ...x }) => x)(m)]));
+    return { ...rest, ...(e ? { edited: e } : {}), ...(Object.keys(s).length ? { suggested: s } : {}) };
+  });
   function exportAll() {
-    const blob = new Blob([JSON.stringify(Object.fromEntries(COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => [c, c === 'learning' ? visibleLearning() : S.data[c]])), null, 2)], { type: 'application/json' });
+    const view = { learning: visibleLearning, messages: visibleMessages, people: visiblePeople, curriculum: visibleCurriculum, projects: visibleProjects };
+    const blob = new Blob([JSON.stringify(Object.fromEntries(COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => [c, view[c] ? view[c]() : S.data[c]])), null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `team-tracker-${today()}.json`; a.click(); URL.revokeObjectURL(a.href);
   }
+  // A collection someone sees only part of, or that decides who they are, is replaced by the lead only.
+  // The CI snapshot is the collector's alone and is never imported.
+  const LEAD_IMPORT = new Set(['settings', 'people', 'projects', 'curriculum', 'learning', 'messages', ...PRIVATE]);
   async function importFile(e) {
     const f = e.target.files[0]; if (!f) return;
     let obj;
     try { obj = JSON.parse(await f.text()); } catch { return toast('Could not read that file'); }
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return toast('Not a tracker export');
-    const keys = COLLECTIONS.filter(c => c in obj && (c !== 'learning' || canSeeHistory()) && (Array.isArray(DEFAULTS[c]()) ? Array.isArray(obj[c]) : obj[c] && typeof obj[c] === 'object' && !Array.isArray(obj[c])));
-    if (!keys.length) return toast('No valid collections in that file');
-    if (!confirm(`Replace ${keys.join(', ')} with the file contents?`)) return;
+    const valid = COLLECTIONS.filter(c => c in obj && (Array.isArray(DEFAULTS[c]()) ? Array.isArray(obj[c]) : obj[c] && typeof obj[c] === 'object' && !Array.isArray(obj[c])));
+    const keys = valid.filter(c => c !== 'ci' && (!LEAD_IMPORT.has(c) || canSeeHistory()));
+    const leadOnly = valid.filter(c => c !== 'ci' && !keys.includes(c));
+    const why = [leadOnly.length ? `Only the lead can import ${leadOnly.join(', ')}.` : '', valid.includes('ci') ? 'ci is written by the CI collector only.' : ''].filter(Boolean).join(' ');
+    if (!keys.length) return toast(why || 'No valid collections in that file', 4000);
+    if (!confirm(`Replace ${keys.join(', ')} with the file contents?${why ? `\n\nSkipped: ${why}` : ''}`)) return;
     for (const c of keys) { S.data[c] = normalize(c, obj[c]); await save(c); }
     render();
   }
