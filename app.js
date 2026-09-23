@@ -946,9 +946,12 @@
     }
   }
 
+  // Supplements (optional) and practicums that continue a lesson (partOf) are listed but not
+  // counted, the way the course author counts lessons.
+  const counted = l => !l.optional && !l.partOf;
   function courseSummary(pid, courseId) {
     const c = course(courseId); if (!c) return null;
-    const ls = lessonsOf(c);
+    const ls = lessonsOf(c).filter(counted);
     const counts = Object.fromEntries(LESSON_STATUS.map(s => [s, 0]));
     let current = null, lastDate = '';
     for (const l of ls) {
@@ -1742,7 +1745,7 @@
       <div class="actions"><button class="btn primary" data-act="enroll-any" data-course="${esc(c.id)}">Enroll someone</button></div></div>
       <div class="tabs">${cs.map(x => `<button class="${x.id === c.id ? 'active' : ''}" data-href="#/learning/${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>
       <div class="card" style="margin-bottom:14px"><h3>${esc(c.name)} <span class="pill">${esc(c.audience || '')}</span></h3><p class="small">${esc(c.description || '')}</p>
-        <dl class="kv"><dt>Where</dt><dd class="mono small">${esc(c.path || '')}</dd><dt>Lessons</dt><dd>${ls.length} in ${(c.phases || []).length} phases</dd>${c.language ? `<dt>Language</dt><dd>${esc(c.language)}</dd>` : ''}</dl>
+        <dl class="kv"><dt>Where</dt><dd class="mono small">${esc(c.path || '')}</dd><dt>Lessons</dt><dd>${ls.filter(counted).length}${ls.length > ls.filter(counted).length ? ` + ${ls.length - ls.filter(counted).length} extra (supplements, practicum)` : ''} in ${(c.phases || []).length} phases</dd>${c.language ? `<dt>Language</dt><dd>${esc(c.language)}</dd>` : ''}</dl>
         ${c.rules?.length ? `<details><summary class="small">Course rules (${c.rules.length})</summary><ul class="plain small">${c.rules.map(r => `<li>${esc(r)}</li>`).join('')}</ul></details>` : ''}
         ${c.milestones?.length ? `<details><summary class="small">Milestones / checkpoints (${c.milestones.length})</summary><ul class="plain small">${c.milestones.map(r => `<li>${esc(r)}</li>`).join('')}</ul></details>` : ''}
         ${c.tracks?.length ? `<details><summary class="small">Pace tracks</summary><ul class="plain small">${c.tracks.map(r => `<li>${esc(r)}</li>`).join('')}</ul></details>` : ''}
@@ -1832,7 +1835,7 @@
     const total = sums.reduce((n, s) => n + s.total, 0);
     const counts = Object.fromEntries(LESSON_STATUS.map(st => [st, sums.reduce((n, s) => n + (s.counts[st] || 0), 0)]));
     const finished = [], stuck = [];
-    for (const s of sums) for (const l of lessonsOf(s.course)) {
+    for (const s of sums) for (const l of lessonsOf(s.course).filter(counted)) {
       const pr = progressOf(pid, l.id);
       if (FINISHED.has(pr.status)) finished.push({ l, c: s.course, day: dayOf(lessonDates(pr).doneAt || pr.date) });
       else if (pr.status === 'stuck') stuck.push({ l, c: s.course, since: pr.date || '' });
