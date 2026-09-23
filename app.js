@@ -35,6 +35,12 @@
   const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
   const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
   const daysSince = d => d ? daysBetween(d, today()) : null;
+  const isDay = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+  const localIso = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
+  const dayOf = at => { if (!at || isDay(at)) return at || ''; const d = new Date(at); return isNaN(d) ? String(at).slice(0, 10) : localIso(d).slice(0, 10); };
+  const whenLocal = at => { if (!at || isDay(at)) return at || ''; const d = new Date(at); return isNaN(d) ? String(at) : localIso(d).slice(0, 16).replace('T', ' '); };
+  const addDays = (day, n) => new Date(Date.parse(day + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+  const nowIso = () => new Date().toISOString();
   const ago = d => { const n = daysSince(d); if (n == null || isNaN(n)) return 'never'; if (n === 0) return 'today'; if (n === 1) return 'yesterday'; if (n < 0) return `in ${-n}d`; return `${n}d ago`; };
   const byDateDesc = (a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || '') || (b.id || '').localeCompare(a.id || '');
   const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
@@ -53,9 +59,9 @@
   });
 
   let toastTimer;
-  function toast(msg) {
+  function toast(msg, ms = 1800) {
     const t = $('#toast'); t.textContent = msg; t.classList.add('show');
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms);
   }
 
   // ---------- persistence
@@ -187,11 +193,14 @@
   }
 
   async function load() {
-    S.broken = new Set(); S.etags = {}; S.ghError = ''; S.ghUser = '';
-    try {
-      const r = await fetch('/api/_meta', { cache: 'no-store' });
-      if (r.ok) { const m = await r.json(); S.server = !!m.server; S.dataDir = m.dataDir || ''; }
-    } catch { S.server = false; }
+    S.broken = new Set(); S.etags = {}; S.ghError = ''; S.ghUser = ''; S.serverLog = false;
+    if (!/\.github\.io$/.test(location.hostname)) {
+      try {
+        const r = await fetch('/api/_meta', { cache: 'no-store' });
+        // a server process older than the log flag is the lead's own, still running
+        if (r.ok) { const m = await r.json(); S.server = !!m.server; S.dataDir = m.dataDir || ''; S.serverLog = m.log !== false; }
+      } catch { S.server = false; }
+    }
     if (!S.server && !ghReady()) S.restoredToken = restoreToken(await fromPasswordStore('silent'));
     S.backend = S.server ? 'server' : ghReady() ? 'github' : 'static';
     if (S.backend === 'github') {
@@ -200,7 +209,7 @@
         if (r.ok) S.ghUser = (await r.json()).login || '';
       } catch { /* the token may not be allowed to name its owner; the manual choice still works */ }
     }
-    S.privateOk = S.server ? true : null;
+    S.privateOk = S.server ? S.serverLog : null;
     for (const c of COLLECTIONS) {
       let obj = null;
       const priv = PRIVATE.has(c) && S.backend === 'github';
@@ -223,14 +232,17 @@
     }
   }
 
-  async function save(c) {
+  // With `replay`, a conflict only reloads the collection and returns 'conflict', so the caller
+  // can apply its change again on top of the newer copy.
+  async function save(c, { replay = false } = {}) {
     if (PRIVATE.has(c) && !canSeeHistory()) return false;
     const obj = S.data[c];
     if (S.backend === 'github') {
       if (S.ghError) { toast('Not saved: GitHub could not be read (' + S.ghError + ')'); return false; }
       const res = await ghPut(c, obj);
       if (res.conflict) {
-        try { S.data[c] = normalize(c, await ghGet(c)); } catch { /* keep */ }
+        try { const fresh = await ghGet(c); if (fresh) S.data[c] = normalize(c, fresh); } catch { /* keep */ }
+        if (replay) return 'conflict';
         toast('Not saved: this data was changed elsewhere. Reloaded — please redo your change.'); render(); return false;
       }
       if (res.error) { toast('Save failed: ' + res.error); return false; }
@@ -243,7 +255,8 @@
         if (S.etags[c]) headers['If-Match'] = S.etags[c];
         const r = await fetch(`/api/${c}`, { method: 'PUT', headers, body: JSON.stringify(obj) });
         if (r.status === 409) {
-          try { S.data[c] = normalize(c, await fetchCollection(c)); } catch { /* keep */ }
+          try { const fresh = await fetchCollection(c); if (fresh) S.data[c] = normalize(c, fresh); } catch { /* keep */ }
+          if (replay) return 'conflict';
           toast('Not saved: this data was changed elsewhere. Reloaded — please redo your change.'); render(); return false;
         }
         if (!r.ok) { let msg = ''; try { msg = (await r.json()).error || ''; } catch { /* ignore */ } toast(`Save failed${msg ? ': ' + msg : ''}`); return false; }
@@ -255,15 +268,89 @@
     catch { toast('Could not save'); return false; }
   }
 
+  // ---------- test catalogues: data/catalog/<projectId>.json, shared and read-only here
+  // A project without a file has no Tests tab; nothing about that is an error.
+  S.catalogs = Object.create(null); S.catPending = new Set(); S.catFilter = Object.create(null);
+  const CATALOG_ID = /^[a-z0-9-]+$/;
+  let catIndex = null;
+  // The server and GitHub both list the folder in one request, so projects without a catalogue are
+  // never asked for one. Without a listing (no server) each project is looked up on its own.
+  function catalogIndex() {
+    if (S.backend !== 'github' && S.backend !== 'server') return Promise.resolve(null);
+    return catIndex ||= (async () => {
+      const g = ghConfig();
+      try {
+        const r = S.backend === 'server'
+          ? await fetch('/api/catalog', { cache: 'no-store' })
+          : await fetch(`https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(g.repo)}/contents/data/catalog?ref=${encodeURIComponent(g.branch)}`, { headers: ghHeaders(), cache: 'no-store' });
+        if (r.status === 404) return new Set();
+        if (!r.ok) return null;
+        const j = await r.json();
+        if (S.backend === 'server') return Array.isArray(j.projects) ? new Set(j.projects.map(String)) : null;
+        return Array.isArray(j) ? new Set(j.filter(f => f && f.type === 'file' && /\.json$/.test(f.name || '')).map(f => f.name.slice(0, -5))) : null;
+      } catch { return null; }
+    })();
+  }
+  const str = v => typeof v === 'string' ? v : v == null ? '' : String(v);
+  const strs = v => Array.isArray(v) ? v.filter(x => x != null && x !== '').map(String) : [];
+  function catalogOf(obj) {
+    if (!obj) return null;
+    if (typeof obj !== 'object' || Array.isArray(obj) || !Array.isArray(obj.tests)) return { error: 'the file holds no list of tests', tests: [] };
+    const tests = obj.tests.filter(t => t && typeof t === 'object').map(t => {
+      const x = {
+        nodeid: str(t.nodeid), file: str(t.file), name: str(t.name), kind: str(t.kind).toLowerCase(), area: str(t.area).trim() || 'Other',
+        title: str(t.title) || str(t.name), does: str(t.does), checks: strs(t.checks), needs: str(t.needs),
+        markers: strs(t.markers), params: strs(t.params), sourceUrl: str(t.sourceUrl),
+      };
+      x.hay = [x.title, x.does, ...x.checks, x.file, x.nodeid].join('\n').toLowerCase();
+      return x;
+    });
+    return { repo: str(obj.repo), branch: str(obj.branch), commit: str(obj.commit), generatedAt: str(obj.generatedAt), tests };
+  }
+  async function ensureCatalog(pid) {
+    if (pid in S.catalogs) return S.catalogs[pid];
+    let cat = null;
+    if (CATALOG_ID.test(pid) && !(S.backend === 'github' && S.ghError)) {
+      const idx = await catalogIndex();
+      if (!idx || idx.has(pid)) {
+        try { cat = catalogOf(await fetchCollection(`catalog/${pid}`)); }
+        // an unreachable source means no catalogue; a file that is there but unreadable is reported
+        catch (e) { cat = e instanceof TypeError ? null : { error: (e && e.message) || 'unknown error', tests: [] }; }
+      }
+    }
+    return (S.catalogs[pid] = cat);
+  }
+  function wantCatalog(pid) {
+    if (pid in S.catalogs || S.catPending.has(pid) || !project(pid)) return;
+    S.catPending.add(pid);
+    ensureCatalog(pid).catch(() => (S.catalogs[pid] = null)).then(cat => {
+      S.catPending.delete(pid);
+      const r = S.route;
+      if (r.name === 'projects' && r.id === pid && (cat || r.tab === 'tests')) render();
+    });
+  }
+
   // ---------- data access
   const settings = () => S.data.settings;
   const people = () => S.data.people;
   const projects = () => S.data.projects;
   // One gate for the whole log: with no access to it every view built on it comes out empty,
   // instead of each one having to remember to ask.
-  const canSeeHistory = () => S.backend === 'server' || S.privateOk === true;
+  // Through the local server that means the log's folder is there beside it, which a clone of this
+  // repository run by anybody else does not have.
+  const canSeeHistory = () => S.privateOk === true;
   const acts = () => canSeeHistory() ? S.data.activities : [];
-  const courses = () => S.data.curriculum.courses;
+  // Learning progress is personal: the lead sees everyone's, anybody else only their own. "Own" is the
+  // person the GitHub token names; the choice in the menu signs posts and opens nobody's progress.
+  const signedInAs = () => personByLogin(S.ghUser)?.id || '';
+  const canSeeLearningOf = pid => canSeeHistory() || (!!pid && pid === signedInAs());
+  function learningLock() {
+    if (S.backend !== 'github') return 'Learning progress is shown to the person it belongs to when this page is connected to GitHub with their own token.';
+    if (!S.ghUser) return 'GitHub did not say which account this token belongs to, so no learning progress is shown. Reload the page to ask again.';
+    return `No person on the team carries the GitHub username ${S.ghUser}, so no learning progress is shown.`;
+  }
+  // A course marked leadOnly (the lead's own track) is not shown to anyone else.
+  const courses = () => S.data.curriculum.courses.filter(c => !c.leadOnly || canSeeHistory());
   const learning = () => S.data.learning;
   const person = id => people().find(p => p.id === id);
   const project = id => projects().find(p => p.id === id);
@@ -368,6 +455,34 @@
     return fmtDur(Math.max(0, Math.round((endMs - new Date(iso).getTime()) / 1000)));
   };
   const snapMinutes = () => { const t = snapAt(); return t ? Math.round((Date.now() - new Date(t).getTime()) / 60000) : null; };
+  // Bitbucket stamps times with nanoseconds, which Date.parse does not take everywhere.
+  const isoMs = iso => Date.parse(String(iso || '').replace(/(\.\d{3})\d+/, '$1'));
+  const fmtBytes = b => !(b > 0) ? '' : b >= 1048576 ? `${(b / 1048576).toFixed(b >= 10485760 ? 0 : 1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+  const groupOf = (s, gid) => ((s && s.groups) || []).find(g => g.id === gid) || null;
+  const groupName = g => g ? `${KIND_TITLE[g.kind] || label(g.kind)}${g.env ? ' · ' + g.env : ''}` : '';
+  const isFinished = r => (r.status || '').toLowerCase() === 'completed';
+
+  // ---------- run reports shown inside the page
+  const hasInline = rep => {
+    const i = rep && rep.inline;
+    if (!i) return false;
+    if (i.type === 'url') return /^https:\/\//.test(i.src || '');
+    return i.type === 'repo' && !!i.ref && /^[\w.\/-]+$/.test(i.path || '') && !/(^|\/)\.\.(\/|$)/.test(i.path);
+  };
+  const firstInline = r => ((r && r.reports) || []).findIndex(hasInline);
+  const newestInline = (s, gid) => runsOfGroup(s, gid).find(r => isFinished(r) && firstInline(r) >= 0) || null;
+  const extLink = rep => `<a class="rep-ext" href="${esc(rep.url)}" target="_blank" rel="noopener" title="Open in a new tab" aria-label="Open ${esc(rep.name || 'the report')} in a new tab">↗</a>`;
+  function reportBtn(pid, runId, rep, idx, html, cls = 'btn sm primary') {
+    const name = rep.name || 'the report', size = fmtBytes(rep.inline && rep.inline.bytes);
+    return `<button class="${cls}" data-act="report" data-project="${esc(pid)}" data-run="${esc(runId)}" data-idx="${idx}" title="${esc(`Open ${name} here${size ? ' (' + size + ')' : ''}`)}">${html}</button>`;
+  }
+  // A report the page can show opens in the viewer; any other stays a link to where it lives.
+  function reportLinks(pid, runId, list, text) {
+    list = list || [];
+    return list.map((rep, i) => hasInline(rep)
+      ? `<span class="rep">${reportBtn(pid, runId, rep, i, esc(list.length > 1 || !text ? rep.name || 'Report' : text))}${extLink(rep)}</span>`
+      : link(rep.url, rep.name)).join(' ');
+  }
 
   function liveBlock(s, showProject) {
     const live = liveRuns(s);
@@ -377,7 +492,7 @@
       ${live.map(r => `<div class="row"><div class="body"><b>${esc(r.name || '')}</b> ${pill('accent', r.activeEnv || r.env || 'running')} ${pill('yellow', label((r.status || '').replace(/_/g, ' ')))}
         ${(r.activeJobs || []).length ? `<div class="small">on at the time: ${(r.activeJobs || []).map(j => `<span class="mono">${esc(j.name)}</span>${j.startedAt ? ` <span class="muted">${esc(elapsed(j.startedAt))}</span>` : ''}`).join(', ')}</div>` : ''}
         <div class="muted small">started ${esc(fmtWhen(r.startedAt))} UTC · had been running ${esc(elapsed(r.startedAt))} when the snapshot was taken${r.trigger ? ' · ' + esc(r.trigger) : ''}${showProject ? ' · ' + esc(s.repoName || '') : ''}</div></div>
-        <div class="ops">${r.url ? link(r.url, 'watch') : ''}</div></div>`).join('')}
+        <div class="ops">${reportLinks(s.projectId, String(r.id), r.reports, 'Report')}${r.url ? link(r.url, 'watch') : ''}</div></div>`).join('')}
       <p class="hint" style="margin-top:6px">${old ? `This is the picture as of ${esc(fmtWhen(snapAt()))} UTC, ${mins} minutes ago — these jobs may have finished since. Press <b>Refresh now</b> for the current state.` : 'Taken at the last collection; “Refresh now” re-reads the sources immediately.'}</p></div>`;
   }
 
@@ -400,55 +515,436 @@
 
   // GitHub's own scheduler is unreliable for a young repository, so a stale snapshot is also
   // refreshed by whoever opens the page: once per session, quietly, and only when it is old.
+  // Every collection is a billed Actions job, so one is never started while another is on.
+  // A collection that is already queued or running, whoever started it, answers for a new one.
+  async function collectionUnderway(cfg) {
+    try {
+      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/actions/workflows/collect-ci.yml/runs?per_page=5`, { headers: ghHeaders(), cache: 'no-store' });
+      if (!r.ok) return false;
+      const j = await r.json();
+      return (j.workflow_runs || []).some(x => x.status !== 'completed' && Date.now() - Date.parse(x.created_at) < 15 * 60000);
+    } catch { return false; }
+  }
+  async function startCollection() {
+    const cfg = ghConfig();
+    if (await collectionUnderway(cfg)) { S.collectAt = Date.now(); return { status: 204, joined: true }; }
+    const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/actions/workflows/collect-ci.yml/dispatches`, {
+      method: 'POST', headers: { ...ghHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: cfg.branch }),
+    });
+    if (r.status === 204) S.collectAt = Date.now();
+    return r;
+  }
+  async function awaitSnapshot(before, tries) {
+    for (let i = 0; i < tries; i++) {
+      await new Promise(res => setTimeout(res, 5000));
+      try {
+        const fresh = await fetchCollection('ci');
+        if (fresh && fresh.collectedAt && fresh.collectedAt !== before) { S.data.ci = normalize('ci', fresh); return true; }
+      } catch { /* keep polling */ }
+    }
+    return false;
+  }
+
   async function autoRefreshIfStale() {
-    if (S.autoRefreshed || S.backend !== 'github') return;
+    if (S.autoRefreshed || S.backend !== 'github' || S.collecting) return;
     const t = snapAt();
     if (t && (Date.now() - new Date(t).getTime()) / 36e5 < (settings().autoCollectAfterHours ?? 3)) return;
-    S.autoRefreshed = true;
-    const cfg = ghConfig();
+    S.autoRefreshed = true; S.collecting = true;
     try {
-      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/actions/workflows/collect-ci.yml/dispatches`, {
-        method: 'POST', headers: { ...ghHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: cfg.branch }),
-      });
+      const r = await startCollection();
       if (r.status !== 204) return;
       toast('The CI snapshot was stale; collecting in the background.');
-      for (let i = 0; i < 24; i++) {
-        await new Promise(res => setTimeout(res, 5000));
-        try {
-          const fresh = await fetchCollection('ci');
-          if (fresh && fresh.collectedAt && fresh.collectedAt !== t) { S.data.ci = normalize('ci', fresh); render(); return; }
-        } catch { /* keep waiting */ }
-      }
+      if (await awaitSnapshot(t, 24)) render();
     } catch { /* the page still shows how old the snapshot is */ }
+    finally { S.collecting = false; }
   }
 
   async function refreshCI(btn) {
     if (S.backend !== 'github') { toast('Connect this page to GitHub first (Data → Connect to GitHub)'); return; }
-    const cfg = ghConfig(), before = ci().collectedAt;
+    if (S.collecting) { toast('A collection is already running; the page updates when it lands.'); return; }
+    const before = ci().collectedAt;
+    S.collecting = true; paintWaits();
     if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
     try {
-      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/actions/workflows/collect-ci.yml/dispatches`, {
-        method: 'POST', headers: { ...ghHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: cfg.branch }),
-      });
+      const r = await startCollection();
       if (r.status !== 204) {
         const err = await ghError(r);
         toast(r.status === 403 || r.status === 404 ? `Cannot refresh from here (${err}). Add “Actions: read and write” to this token.` : 'Refresh failed: ' + err);
         return;
       }
-      toast('Collecting…');
-      for (let i = 0; i < 40; i++) {
-        await new Promise(res => setTimeout(res, 5000));
-        try {
-          const fresh = await fetchCollection('ci');
-          if (fresh && fresh.collectedAt && fresh.collectedAt !== before) { S.data.ci = normalize('ci', fresh); toast('Updated'); render(); return; }
-        } catch { /* keep polling */ }
-      }
+      toast(r.joined ? 'A collection is already running; the page waits for it.' : 'Collecting…');
+      if (await awaitSnapshot(before, 40)) { S.collecting = false; toast('Updated'); render(); return; }
       toast('The collector is still running; the page will pick it up on its own.');
     } catch { toast('Could not reach GitHub'); }
-    finally { if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = '↻ Refresh now'; } }
+    finally { S.collecting = false; paintWaits(); if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = '↻ Refresh now'; } }
+  }
+
+  // ---------- a started run, followed until its report is in
+  // Collections are billed Actions minutes, so a started run is looked for when it is likely to be
+  // over: at the group's usual duration plus 2 minutes (10 minutes with no past runs). Where past runs
+  // fall into two clusters, runs that stopped early and runs that went through, it is looked for
+  // after each. Then at most 2 more times, a tenth of the usual duration apart (5 minutes at least),
+  // within 3 hours of the start, and only while this page is open: at most 4 collections a run. Both
+  // rules are self-contained so tools/test_schedule.js can run them on their own.
+  function checkPlan(durations) {
+    const d = (durations || []).filter(n => typeof n === 'number' && n > 0).sort((x, y) => x - y);
+    if (!d.length) return { plan: [10], expectSec: null, earlySec: null };
+    const median = a => { const m = a.length >> 1; return a.length % 2 ? a[m] : Math.round((a[m - 1] + a[m]) / 2); };
+    const minutes = sec => Math.ceil(sec / 60) + 2;
+    let cut = 0, gap = 3;
+    for (let i = 1; i < d.length; i++) if (d[i] / d[i - 1] >= gap) { gap = d[i] / d[i - 1]; cut = i; }
+    if (!cut) { const m = median(d); return { plan: [minutes(m)], expectSec: m, earlySec: null }; }
+    const early = median(d.slice(0, cut)), full = median(d.slice(cut));
+    return { plan: [minutes(early), minutes(full)], expectSec: full, earlySec: early };
+  }
+  function nextCollectAt(w, now) {
+    const MIN = 60000, EXTRA = 2, LIMIT = 180 * MIN;
+    const at = Date.parse(w && w.at), made = (w && w.made) || 0;
+    if (!w || w.finished || !(at > 0)) return null;
+    const plan = Array.isArray(w.plan) && w.plan.length ? w.plan : [w.firstMin > 0 ? w.firstMin : 10];
+    const last = plan[plan.length - 1], every = Math.max(5, Math.round(last / 10)) * MIN;
+    if (made >= plan.length + EXTRA) return null;
+    const planned = at + (made < plan.length ? plan[made] * MIN : last * MIN + (made - plan.length + 1) * every);
+    const due = made ? Math.max(planned, (Date.parse(w.lastAt) || at) + every) : planned;
+    return due - at > LIMIT || now - at > LIMIT ? null : due;
+  }
+
+  const WAITS_KEY = LS + 'waits';
+  const WAIT_MAX_MS = 3 * 3600000;
+  function readWaits() {
+    let list = [];
+    try { list = JSON.parse(sessionStorage.getItem(WAITS_KEY) || '[]'); } catch { list = []; }
+    return (Array.isArray(list) ? list : []).filter(w => w && w.id && w.projectId && w.groupId && Date.now() - Date.parse(w.at) <= WAIT_MAX_MS);
+  }
+  function writeWaits() {
+    try { if (S.waits.length) sessionStorage.setItem(WAITS_KEY, JSON.stringify(S.waits)); else sessionStorage.removeItem(WAITS_KEY); } catch { /* kept for this visit only */ }
+  }
+  S.waits = readWaits();
+  writeWaits();
+
+  function addWait(s, g) {
+    // a cancelled run says nothing about how long a run takes
+    const p = checkPlan(runsOfGroup(s, g.id).filter(r => isFinished(r) && !/cancel|skip/.test(runResult(r))).map(r => r.durationSec));
+    const w = { id: uid('w'), projectId: s.projectId, groupId: g.id, at: nowIso(), expectSec: p.expectSec, earlySec: p.earlySec, plan: p.plan, firstMin: p.plan[0], made: 0, lastAt: '', runId: '', finished: false };
+    S.waits = S.waits.filter(x => !(x.projectId === w.projectId && x.groupId === w.groupId)).concat(w);
+    writeWaits(); armWaits();
+    return w;
+  }
+  function dismissWait(id) {
+    S.waits = S.waits.filter(w => w.id !== id);
+    writeWaits(); armWaits(); paintWaits();
+  }
+  // The run a Run press started: the first of its group from then on, a manual one first.
+  function waitRun(w, s) {
+    const runs = runsOfGroup(s, w.groupId);
+    if (w.runId) return runs.find(r => String(r.id) === w.runId) || null;
+    const since = Date.parse(w.at) - 60000;
+    const after = runs.filter(r => isoMs(r.startedAt) >= since).sort((a, b) => isoMs(a.startedAt) - isoMs(b.startedAt));
+    return after.find(r => /dispatch|manual/i.test(r.trigger || '')) || after[0] || null;
+  }
+  const waitTitle = w => groupName(groupOf(ciSource(w.projectId), w.groupId)) || w.groupId;
+  function syncWaits() {
+    const now = Date.now(), before = S.waits.length;
+    let changed = false;
+    S.waits = S.waits.filter(w => now - Date.parse(w.at) <= WAIT_MAX_MS);
+    for (const w of S.waits) {
+      const s = ciSource(w.projectId), run = s ? waitRun(w, s) : null;
+      if (!run) continue;
+      if (!w.runId && /dispatch|manual/i.test(run.trigger || '')) { w.runId = String(run.id); changed = true; }
+      if (isFinished(run) && !w.finished) {
+        w.finished = true; changed = true;
+        toast(firstInline(run) >= 0 ? `Report ready: ${waitTitle(w)}` : `${waitTitle(w)} finished: ${label(runResult(run))}`, 6000);
+      }
+    }
+    if (changed || S.waits.length !== before) writeWaits();
+    armWaits(now);
+  }
+  let waitTimer = null;
+  function armWaits(now = Date.now()) {
+    clearTimeout(waitTimer); waitTimer = null;
+    if (S.backend !== 'github') return;
+    const due = S.waits.map(w => nextCollectAt(w, now)).filter(t => t != null);
+    if (!due.length) return;
+    const wait = Math.min(...due) - now;
+    // at least once a minute, so the countdown on the cards stays true
+    waitTimer = setTimeout(tickWaits, Math.min(60000, Math.max(S.collecting ? 15000 : 1000, wait)));
+  }
+  async function tickWaits() {
+    waitTimer = null;
+    const now = Date.now();
+    const due = S.waits.filter(w => { const t = nextCollectAt(w, now); return t != null && t <= now; });
+    if (due.length && !S.collecting) {
+      const dueAt = Math.min(...due.map(w => nextCollectAt(w, now)));
+      due.forEach(w => { w.made = (w.made || 0) + 1; w.lastAt = new Date(now).toISOString(); });
+      writeWaits();
+      // a collection somebody started a moment ago answers for this check too
+      if (!(S.collectAt && now - S.collectAt < 3 * 60000)) {
+        S.collecting = true; S.waitError = ''; paintWaits();
+        let fresh = false;
+        try {
+          // and so does a snapshot that landed since the check fell due, whoever collected it
+          const latest = await fetchCollection('ci');
+          if (latest && latest.collectedAt && latest.collectedAt !== ci().collectedAt) { S.data.ci = normalize('ci', latest); fresh = true; }
+          if (!(isoMs(ci().collectedAt) >= dueAt - 2 * 60000)) {
+            const r = await startCollection();
+            if (r.status === 204) fresh = (await awaitSnapshot(ci().collectedAt, 36)) || fresh;
+            else S.waitError = await ghError(r);
+          }
+        } catch { S.waitError = 'GitHub could not be reached'; }
+        finally { S.collecting = false; }
+        if (fresh) { render(); return; }
+      }
+    }
+    syncWaits(); paintWaits();
+  }
+
+  function waitCard(w, showProject) {
+    const now = Date.now(), s = ciSource(w.projectId), run = s ? waitRun(w, s) : null, next = nextCollectAt(w, now);
+    const name = `${waitTitle(w)}${showProject ? ' — ' + (project(w.projectId)?.name || w.projectId) : ''}`;
+    const expect = w.expectSec ? `expected about ${aboutMin(w.expectSec)}${w.earlySec ? `, or about ${aboutMin(w.earlySec)} if it stops early` : ''}` : 'no past runs to estimate from';
+    const utcTime = ms => `${fmtWhen(new Date(ms).toISOString()).slice(11)} UTC`;
+    const asked = utcTime(Date.parse(w.at));
+    const x = `<button class="btn sm ghost" data-act="wait-dismiss" data-id="${esc(w.id)}" title="Stop following this run" aria-label="Stop following this run">✕</button>`;
+    let cls = 'card wait', head, body, ops = '', live = false;
+    if (run && isFinished(run)) {
+      const i = firstInline(run);
+      head = i >= 0 ? 'Report ready' : `Finished — ${label(runResult(run).replace(/_/g, ' '))}`;
+      if (i >= 0) { cls += ' ready'; ops = reportBtn(w.projectId, String(run.id), run.reports[i], i, 'Open report', 'btn primary'); }
+      body = `${resultPill(run)} ${run.counts ? esc(countsText(run.counts)) + ' · ' : ''}started ${esc(fmtWhen(run.startedAt))} UTC${run.durationSec ? ', took ' + esc(fmtDur(run.durationSec)) : ''}`
+        + (i >= 0 ? '' : `<div>No report came with this run. ${run.url ? link(run.url, 'Open the run') : ''} ${reportLinks(w.projectId, String(run.id), run.reports)}</div>`);
+    } else if (next == null) {
+      cls += ' lost';
+      head = run ? 'Still running at the last check' : 'Not seen in the snapshot yet';
+      body = `Requested ${esc(asked)}. The page made its ${w.made || 0} checks and stops collecting for it here; “Refresh now” looks again${run && run.url ? `, or ${link(run.url, 'follow it at the source')}` : ''}.`;
+    } else {
+      live = true;
+      head = `${run ? 'Running' : 'Started'} — ${expect}`;
+      const mins = Math.max(1, Math.ceil((next - now) / 60000));
+      const check = S.backend !== 'github' ? 'this page is not connected to GitHub, so it cannot look for the result itself'
+        : S.collecting ? 'collecting now…' : next <= now ? 'checking…' : `next check in ${mins} min, at ${utcTime(next)}`;
+      body = `Requested ${esc(asked)}${run ? ` · running since ${esc(fmtWhen(run.startedAt))} UTC` : ''} · ${esc(check)}${w.made ? ` · ${w.made} check${w.made === 1 ? '' : 's'} so far` : ''}`
+        + `${S.waitError ? `<div style="color:var(--red-text)">The last collection could not start: ${esc(S.waitError)}</div>` : ''}`
+        + `<div class="hint">${esc(planText(w))}</div>`;
+      if (run && run.url) ops = link(run.url, 'watch');
+    }
+    return `<div class="${cls}" data-wait="${esc(w.id)}"><div class="wait-row"><div class="body"><h3>${live ? '<span class="live-dot"></span>' : ''}${esc(head)} <span class="muted small">${esc(name)}</span></h3>
+      <div class="small muted">${body}</div></div><div class="ops">${ops}${x}</div></div></div>`;
+  }
+  // the rule of nextCollectAt, as the card tells it
+  function planText(w) {
+    const plan = Array.isArray(w.plan) && w.plan.length ? w.plan : [w.firstMin || 10];
+    const every = Math.max(5, Math.round(plan[plan.length - 1] / 10));
+    return `The page collects ${plan.map(m => aboutMin(m * 60)).join(' and ')} after the start, then at most twice more, ${every} min apart, while it stays open. A collection anyone else starts meanwhile counts as one of these.`;
+  }
+  const waitCards = pid => S.waits.filter(w => !pid || w.projectId === pid).map(w => waitCard(w, !pid)).join('');
+  const waitsBox = pid => `<div class="waits" data-waits="${esc(pid)}">${waitCards(pid)}</div>`;
+  function paintWaits() { $$('[data-waits]').forEach(el => { el.innerHTML = waitCards(el.dataset.waits); }); }
+  const aboutMin = sec => { const m = Math.max(1, Math.round(sec / 60)); return m < 90 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
+
+  // ---------- the report viewer
+  const LARGE_REPORT = 10 * 1048576;
+  const NOASK_KEY = LS + 'reportNoAsk';
+  // Never allow-same-origin on a report the page fetched: a blob: URL runs with this page's
+  // origin and could then read the GitHub token kept in localStorage.
+  const BLOB_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads';
+  let viewer = null;
+  function openReportFor(pid, runId, idx) {
+    const s = ciSource(pid); if (!s) return;
+    const r = runId ? runsOf(s).find(x => String(x.id) === runId) : null;
+    const rep = runId && !r ? null : ((r ? r.reports : s.reports) || [])[Number(idx)];
+    if (!rep) { toast('That report is no longer in the snapshot'); return; }
+    const caption = r
+      ? [project(pid)?.name, groupName(groupOf(s, r.group)) || r.name, `${fmtWhen(r.startedAt)} UTC`, label(runResult(r).replace(/_/g, ' '))]
+      : [project(pid)?.name, s.repoName];
+    openReport(rep, caption.filter(Boolean).join(' · '));
+  }
+  async function readBody(r, onProgress) {
+    if (!r.body || typeof r.body.getReader !== 'function') return [await r.arrayBuffer()];
+    const reader = r.body.getReader(), parts = [];
+    let n = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return parts;
+      parts.push(value); n += value.byteLength; onProgress(n);
+    }
+  }
+  function openReport(rep, caption) {
+    if (!rep) return;
+    if (!hasInline(rep)) { window.open(rep.url, '_blank', 'noopener'); return; }
+    if (viewer) viewer.close();
+    const inl = rep.inline, size = fmtBytes(inl.bytes), name = rep.name || 'Report';
+    const where = /(^|\.)bitbucket\.org$/.test((() => { try { return new URL(rep.url).hostname; } catch { return ''; } })()) ? 'Open on Bitbucket' : 'Open in a new tab';
+    const back = document.activeElement;
+    // a background refresh may re-render the page meanwhile; focus then returns to the same control
+    const backSel = back && back.dataset && back.dataset.act === 'report' && typeof CSS !== 'undefined' && CSS.escape
+      ? ['act', 'project', 'run', 'idx'].map(k => `[data-${k}="${CSS.escape(back.dataset[k] || '')}"]`).join('') : '';
+    const bg = document.createElement('div'); bg.className = 'modal-bg report-bg';
+    bg.innerHTML = `<div class="modal report-viewer" role="dialog" aria-modal="true" aria-label="${esc(name)}">
+      <header><div class="rv-title"><h2>${esc(name)}</h2><div class="muted small">${esc([caption, size].filter(Boolean).join(' · '))}</div></div>
+        <div class="actions"><a class="btn sm" data-ext href="${esc(rep.url)}" target="_blank" rel="noopener">${where} ↗</a><button type="button" class="btn sm" data-x aria-label="Close the report">✕ Close</button></div></header>
+      <div class="rv-body"><div class="rv-state" role="status" aria-live="polite"></div></div></div>`;
+    document.body.appendChild(bg); document.body.classList.add('viewing');
+    const body = $('.rv-body', bg), state = $('.rv-state', bg);
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    let frame = null, blobUrl = '', slow = null, closed = false;
+    const show = html => { state.innerHTML = html; state.hidden = false; };
+    const spin = html => show(`<div class="spinner" aria-hidden="true"></div><p>${html}</p>`);
+    const fail = msg => show(`<p>${esc(msg)}</p><p><a class="btn" href="${esc(rep.url)}" target="_blank" rel="noopener">${where} ↗</a></p>`);
+    const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+    const close = () => {
+      if (closed) return; closed = true;
+      if (ctl) ctl.abort();
+      clearTimeout(slow);
+      document.removeEventListener('keydown', onKey);
+      if (frame) frame.remove();
+      bg.remove(); document.body.classList.remove('viewing');
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      viewer = null;
+      const to = back && back.isConnected ? back : backSel ? $(backSel) : null;
+      if (to && typeof to.focus === 'function') to.focus();
+    };
+    viewer = { close };
+    document.addEventListener('keydown', onKey);
+    $('[data-x]', bg).addEventListener('click', close);
+    bg.addEventListener('click', e => { if (e.target === bg) close(); });
+
+    const mount = (src, sandbox) => {
+      frame = document.createElement('iframe');
+      frame.title = name;
+      frame.setAttribute('sandbox', sandbox);
+      frame.setAttribute('referrerpolicy', 'no-referrer');
+      frame.addEventListener('load', () => { clearTimeout(slow); if (!closed) state.hidden = true; }, { once: true });
+      frame.src = src;
+      body.prepend(frame);
+      slow = setTimeout(() => {
+        if (closed || state.hidden) return;
+        show(`<div class="spinner" aria-hidden="true"></div><p>Still loading. A large report takes a while; the link above opens it on its own.</p><button type="button" class="btn" data-peek>Show what has loaded</button>`);
+        $('[data-peek]', state).addEventListener('click', () => { state.hidden = true; });
+      }, 30000);
+    };
+    const loadUrl = () => {
+      spin(`Loading the report${size ? ` (${esc(size)})` : ''}…`);
+      let same = true;
+      try { same = new URL(inl.src, location.href).origin === location.origin; } catch { /* treat as this origin */ }
+      mount(inl.src, same ? BLOB_SANDBOX : BLOB_SANDBOX + ' allow-same-origin allow-forms');
+    };
+    const loadRepo = async () => {
+      const g = ghConfig(), local = S.backend === 'server';
+      if (!local && !g.token) {
+        fail('This report is kept in the tracker repository on GitHub. Connect this page to GitHub (Data → Connect to GitHub) to open it here.');
+        return;
+      }
+      spin(`Fetching the report from GitHub${size ? ` <span data-progress>(${esc(size)})</span>` : ' <span data-progress></span>'}…`);
+      const path = inl.path.split('/').map(encodeURIComponent).join('/');
+      let r;
+      try {
+        r = local
+          ? await fetch(`/api/report?ref=${encodeURIComponent(inl.ref)}&path=${encodeURIComponent(inl.path)}`, { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+          : await fetch(`https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(g.repo)}/contents/${path}?ref=${encodeURIComponent(inl.ref)}`, {
+            headers: { Authorization: `Bearer ${g.token}`, Accept: 'application/vnd.github.raw', 'X-GitHub-Api-Version': '2022-11-28' },
+            signal: ctl ? ctl.signal : undefined,
+          });
+      } catch { if (!closed) fail(local ? 'The local server could not be reached, so the report did not load.' : 'GitHub could not be reached, so the report did not load.'); return; }
+      if (closed) return;
+      if (!r.ok && local && r.status !== 404) {
+        let msg = ''; try { msg = (await r.json()).error || ''; } catch { /* no body */ }
+        fail(`The local server could not fetch the report from GitHub${msg ? ': ' + msg : ''}.`);
+        return;
+      }
+      if (!r.ok) {
+        const limited = r.headers.get('x-ratelimit-remaining') === '0';
+        fail(r.status === 404 ? 'This report is not in the tracker repository any more. Only the newest reports are kept there, and a new one is added by the next collection.'
+          : r.status === 401 ? 'GitHub rejected the token in this browser (401), so the report cannot be fetched. Connect again on the Data page.'
+          : r.status === 403 && limited ? 'GitHub’s rate limit for this token is used up. Try again later.'
+          : r.status === 403 ? 'The token in this browser cannot read files in the tracker repository (403). It needs Contents: read.'
+          : `GitHub answered ${r.status}, so the report did not load.`);
+        return;
+      }
+      let parts;
+      try {
+        parts = await readBody(r, n => { const p = $('[data-progress]', state); if (p) p.textContent = `(${fmtBytes(n)}${size ? ' of ' + size : ''})`; });
+      } catch { if (!closed) fail('The download stopped before the report was complete.'); return; }
+      if (closed) return;
+      blobUrl = URL.createObjectURL(new Blob(parts, { type: 'text/html;charset=utf-8' }));
+      spin('Opening the report…');
+      mount(blobUrl, BLOB_SANDBOX);
+    };
+    const start = () => (inl.type === 'url' ? loadUrl() : loadRepo());
+    let noAsk = false;
+    try { noAsk = localStorage.getItem(NOASK_KEY) === '1'; } catch { /* ask every time */ }
+    if (inl.bytes >= LARGE_REPORT && !noAsk) {
+      show(`<p>This report is <b>${esc(size)}</b>. Showing it here downloads all of it${inl.type === 'repo' ? ' through GitHub' : ''}.</p>
+        <button type="button" class="btn primary" data-load>Load the report</button>
+        <label class="small"><input type="checkbox" data-noask> Load large reports without asking on this device</label>`);
+      const go = $('[data-load]', state);
+      go.addEventListener('click', () => {
+        if ($('[data-noask]', state).checked) { try { localStorage.setItem(NOASK_KEY, '1'); } catch { /* ask next time */ } }
+        start();
+      });
+      go.focus();
+    } else {
+      start();
+      $('[data-x]', bg).focus();
+    }
   }
   const progressOf = (pid, lid) => learning().progress[`${pid}|${lid}`] || { status: 'not-started' };
   const enrollmentsOf = pid => learning().enrollments.filter(e => e.personId === pid);
+  const visibleLearning = () => canSeeHistory() ? learning() : {
+    enrollments: learning().enrollments.filter(e => canSeeLearningOf(e.personId)),
+    progress: Object.fromEntries(Object.entries(learning().progress).filter(([k]) => canSeeLearningOf(k.slice(0, k.indexOf('|'))))),
+  };
+
+  // Every status change of a lesson is kept in history as {status, at}, with `on` when the day it
+  // stands for is not the day it was recorded.
+  const FINISHED = new Set(['done', 'gate-passed']);
+  const CLICK_THROUGH_MS = 60000;
+  // Status runs of one lesson. A status replaced within a minute was only passed through (a matrix
+  // cell cycles), so it does not count; a repeated status with `on` corrects the day of its run.
+  function marksOf(pr) {
+    if (!pr) return [];
+    const h = Array.isArray(pr.history) && pr.history.length ? pr.history
+      : pr.status && pr.status !== 'not-started' && pr.date ? [{ status: pr.status, at: pr.date }] : [];
+    const merge = list => list.reduce((out, e) => {
+      const last = out[out.length - 1];
+      if (last && last.status === e.status) { if (e.on) last.on = e.on; } else out.push({ status: e.status, at: e.at, on: e.on || '' });
+      return out;
+    }, []);
+    const runs = merge(h.filter(e => e && e.status && e.at));
+    const gap = (a, b) => isDay(a) || isDay(b) ? Infinity : Date.parse(b) - Date.parse(a);
+    return merge(runs.filter((r, i) => !runs[i + 1] || !(gap(r.at, runs[i + 1].at) < CLICK_THROUGH_MS)))
+      .map(r => ({ status: r.status, at: r.at, when: r.on || r.at }));
+  }
+  function lessonDates(pr) {
+    const runs = marksOf(pr);
+    const first = f => (runs.find(f) || {}).when || '';
+    return { startedAt: first(r => r.status !== 'not-started'), doneAt: first(r => FINISHED.has(r.status)), gatePassedAt: first(r => r.status === 'gate-passed') };
+  }
+  // An undefined note keeps the note already there.
+  function applyMark(l, pid, lid, status, note, at, on) {
+    const key = `${pid}|${lid}`, prev = l.progress[key];
+    const was = (prev && prev.status) || 'not-started';
+    const history = prev && Array.isArray(prev.history) ? prev.history.slice() : [];
+    if (!history.length && was !== 'not-started' && prev.date) history.push({ status: was, at: prev.date });
+    const changed = status !== was;
+    const redated = !changed && !!on && on !== (prev && prev.date) && was !== 'not-started';
+    const last = history[history.length - 1];
+    if ((changed || redated) && !(last && last.at === at && last.status === status)) history.push(on && (redated || on !== dayOf(at)) ? { status, at, on } : { status, at });
+    const text = note === undefined ? (prev && prev.note) || '' : note;
+    if (!history.length && status === 'not-started' && !text) { delete l.progress[key]; return; }
+    const e = { ...prev, status, date: on || (changed || !(prev && prev.date) ? today() : prev.date), note: text };
+    if (history.length) e.history = history; else delete e.history;
+    const d = lessonDates(e);
+    for (const k of ['startedAt', 'doneAt', 'gatePassedAt']) { if (d[k]) e[k] = d[k]; else delete e[k]; }
+    l.progress[key] = e;
+  }
+  // A conflict reloads the file and applies the change again on top, so nobody's marks are lost.
+  async function saveLearning(mutate) {
+    for (let i = 0; ; i++) {
+      mutate(learning());
+      const r = await save('learning', { replay: i < 2 });
+      if (r !== 'conflict') return r;
+    }
+  }
 
   function courseSummary(pid, courseId) {
     const c = course(courseId); if (!c) return null;
@@ -505,7 +1001,7 @@
         if (!o) out.push({ lvl: 'grey', text: `${m.name}: no 1:1 logged yet`, href: `#/people/${m.id}` });
         else if (daysSince(o.date) > (st.oneOnOneCadenceDays || 7)) out.push({ lvl: 'yellow', text: `${m.name}: last 1:1 ${ago(o.date)}`, href: `#/people/${m.id}` });
       }
-      for (const e of enrollmentsOf(m.id)) {
+      for (const e of canSeeLearningOf(m.id) ? enrollmentsOf(m.id) : []) {
         const cs = courseSummary(m.id, e.courseId); if (!cs) continue;
         const stuck = lessonsOf(cs.course).filter(l => progressOf(m.id, l.id).status === 'stuck');
         for (const l of stuck) out.push({ lvl: 'red', text: `${m.name}: stuck on ${l.title} (${cs.course.name})`, href: `#/people/${m.id}` });
@@ -669,14 +1165,15 @@
 
   async function editPerson(id) {
     const p = id ? person(id) : { id: '', role: 'mentee', active: true, track: 'basic' };
+    const learn = !id || canSeeLearningOf(id);
     const v = await form(id ? `Edit — ${p.name}` : 'Add person', [
       { key: 'name', label: 'Name', required: true },
       { key: 'role', label: 'Role', type: 'select', options: opt(ROLES) },
       { key: 'title', label: 'Title', help: 'e.g. Manual QA, moving to automation' },
       { key: 'githubLogin', label: 'GitHub username', help: 'When they open the tracker with their own token, everything they post is signed as this person.' },
-      { key: 'track', label: 'Learning track', type: 'select', options: opt(TRACKS), allowEmpty: true, emptyLabel: 'not set' },
+      ...(learn ? [{ key: 'track', label: 'Learning track', type: 'select', options: opt(TRACKS), allowEmpty: true, emptyLabel: 'not set' }] : []),
       { key: 'startedOn', label: 'Started with you on', type: 'date' },
-      { key: 'weeklyLearningHours', label: 'Learning hours per week', type: 'number', step: '0.5' },
+      ...(learn ? [{ key: 'weeklyLearningHours', label: 'Learning hours per week', type: 'number', step: '0.5' }] : []),
       { key: 'focus', label: 'Current focus', help: 'What they are on right now, one line. Shows on the dashboard.' },
       { key: 'active', label: 'Active', type: 'checkbox', text: 'Currently on the team' },
     ], { active: true, ...p });
@@ -691,6 +1188,7 @@
   }
 
   async function editActivity(id, preset = {}) {
+    if (!canSeeHistory()) return;
     const a = id ? acts().find(x => x.id === id) : { id: '', date: today(), type: 'update', ...preset };
     const v = await form(id ? 'Edit entry' : (preset.type === 'one-on-one' ? 'Log a 1:1' : preset.type === 'blocker' ? 'Log a blocker' : 'Log activity'), [
       { key: 'date', label: 'Date', type: 'date', required: true },
@@ -717,6 +1215,7 @@
   }
 
   async function enroll(pid, preset = {}) {
+    if (!canSeeLearningOf(pid)) return;
     const list = learning().enrollments;
     const editing = preset.courseId ? list.find(e => e.personId === pid && e.courseId === preset.courseId) : null;
     const v = await form(editing ? `Enrollment — ${pname(pid)}` : `Enroll ${pname(pid)}`, [
@@ -732,33 +1231,35 @@
     await save('learning'); render();
   }
   async function unenroll(pid, courseId) {
+    if (!canSeeLearningOf(pid)) return;
     if (!confirm(`Remove ${pname(pid)} from ${course(courseId)?.name}? Lesson marks are kept.`)) return;
     learning().enrollments = learning().enrollments.filter(e => !(e.personId === pid && e.courseId === courseId));
     await save('learning'); render();
   }
-  async function setLesson(pid, lid, status, note) {
-    const key = `${pid}|${lid}`;
-    if (status === 'not-started' && !note) delete learning().progress[key];
-    else learning().progress[key] = { status, date: today(), note: note || '' };
-    await save('learning');
+  async function setLesson(pid, lid, status) {
+    if (!canSeeLearningOf(pid)) return false;
+    const at = nowIso();
+    return saveLearning(l => applyMark(l, pid, lid, status, undefined, at, ''));
   }
   async function cycleLesson(pid, lid, title) {
+    if (!canSeeLearningOf(pid)) return;
     const cur = progressOf(pid, lid).status;
     const next = LESSON_STATUS[(LESSON_STATUS.indexOf(cur) + 1) % LESSON_STATUS.length];
-    await setLesson(pid, lid, next, progressOf(pid, lid).note);
+    await setLesson(pid, lid, next);
     S.lastCell = { person: pname(pid), title: title || lid, status: next }; render();
   }
   async function editLesson(pid, lid, title) {
-    const cur = progressOf(pid, lid);
+    if (!canSeeLearningOf(pid)) return;
+    const cur = progressOf(pid, lid), shown = cur.date || today();
     const v = await form(`${pname(pid)} — ${title}`, [
       { key: 'status', label: 'Status', type: 'select', options: opt(LESSON_STATUS) },
-      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'date', label: 'Date', type: 'date', help: 'the day this status was reached; change it only if that was another day' },
       { key: 'note', label: 'Note', type: 'textarea', help: 'what was shown, where stuck, what to revisit' },
-    ], { status: cur.status, date: cur.date || today(), note: cur.note || '' });
+    ], { status: cur.status, date: shown, note: cur.note || '' });
     if (!v) return;
-    const key = `${pid}|${lid}`;
-    if (v.status === 'not-started' && !v.note) delete learning().progress[key]; else learning().progress[key] = { status: v.status, date: v.date || today(), note: v.note };
-    await save('learning'); render();
+    const at = nowIso(), on = v.date && v.date !== shown ? v.date : '';
+    await saveLearning(l => applyMark(l, pid, lid, v.status, v.note, at, on));
+    render();
   }
 
   // Starting a run goes through the tracker's own "Run tests" workflow, which holds the
@@ -775,7 +1276,12 @@
         method: 'POST', headers: { ...ghHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ ref: cfg.branch, inputs: { project: projectId, target: g.dispatchTarget || g.workflowFile } }),
       });
-      if (r.status === 204) { toast('Run requested. It shows up here after the next collection.'); return; }
+      if (r.status === 204) {
+        const w = addWait(s, g);
+        toast('Run requested. The card on the CI tab follows it until its report is in.'); render();
+        const card = $(`[data-wait="${w.id}"]`); if (card) card.scrollIntoView({ block: 'nearest' });
+        return;
+      }
       const err = await ghError(r);
       if (r.status === 403 || r.status === 404) { toast(`Cannot start it from here (${err}). Add “Actions: read and write” to this token, or open it on GitHub.`); return; }
       toast('Could not start the run: ' + err);
@@ -822,7 +1328,7 @@
     const st = settings(), att = attention();
     const act = projects().filter(p => p.status === 'active');
     const overdue11 = mentees().filter(m => { const o = lastOneOnOne(m.id); return !o || daysSince(o.date) > (st.oneOnOneCadenceDays || 7); });
-    const pcts = mentees().flatMap(m => enrollmentsOf(m.id).map(e => courseSummary(m.id, e.courseId)?.pct ?? 0));
+    const pcts = activePeople().filter(p => canSeeHistory() ? p.role === 'mentee' : canSeeLearningOf(p.id)).flatMap(m => enrollmentsOf(m.id).map(e => courseSummary(m.id, e.courseId)?.pct ?? 0));
     const avg = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
     const reds = att.filter(a => a.lvl === 'red').length;
     const hist = canSeeHistory();
@@ -835,7 +1341,7 @@
         <div class="kpi ${reds ? 'bad' : 'good'}"><div class="v">${reds}</div><div class="l">red flags</div></div>
         ${hist ? `<div class="kpi ${openBlockers().length ? 'bad' : 'good'}"><div class="v">${openBlockers().length}</div><div class="l">open blockers</div></div>
         <div class="kpi ${overdue11.length ? 'warn' : 'good'}"><div class="v">${overdue11.length}</div><div class="l">1:1s due</div></div>` : ''}
-        <div class="kpi"><div class="v">${avg == null ? '—' : avg + '%'}</div><div class="l">avg learning progress</div></div>
+        <div class="kpi"><div class="v">${avg == null ? '—' : avg + '%'}</div><div class="l">${canSeeHistory() ? 'avg learning progress' : 'your learning progress'}</div></div>
       </div>
       <div class="grid ${hist ? 'cols-2' : ''}">
         <div class="section"><div class="section-head"><h2>Needs attention</h2><span class="hint">${att.length} item${att.length === 1 ? '' : 's'}</span></div>
@@ -850,9 +1356,9 @@
         ${activePeople().sort((a, b) => (a.role === 'mentee' ? 0 : 1) - (b.role === 'mentee' ? 0 : 1)).map(p => {
           const la = personActs(p.id)[0], o = lastOneOnOne(p.id);
           const prs = personProjects(p.id).map(pr => `${prlink(pr.id)} <span class="muted small">(${esc(personRoleIn(pr, p.id))})</span>`).join('<br>') || '<span class="muted">—</span>';
-          const lr = enrollmentsOf(p.id).map(e => courseSummary(p.id, e.courseId)).filter(Boolean).map(cs => `<div class="small"><b>${cs.pct}%</b> ${esc(cs.course.name)}${cs.current ? ` · <span class="muted">now: ${esc(cs.current.title)}</span>` : ' · <span class="muted">complete</span>'}</div>${progressBar(cs)}`).join('') || '<span class="muted">—</span>';
+          const lr = (canSeeLearningOf(p.id) ? enrollmentsOf(p.id) : []).map(e => courseSummary(p.id, e.courseId)).filter(Boolean).map(cs => `<div class="small"><b>${cs.pct}%</b> ${esc(cs.course.name)}${cs.current ? ` · <span class="muted">now: ${esc(cs.current.title)}</span>` : ' · <span class="muted">complete</span>'}</div>${progressBar(cs)}`).join('') || '<span class="muted">—</span>';
           return `<tr><td>${plink(p.id)}<div class="muted small">${esc(p.title || label(p.role))}</div></td><td>${esc(p.focus || '—')}</td><td>${prs}</td>${hist ? `<td>${la ? `<div class="small">${esc(trunc(la.text, 80))}</div><span class="muted small">${esc(ago(la.date))}</span>` : '<span class="muted">—</span>'}</td><td>${o ? `<span title="${esc(o.date)}">${esc(ago(o.date))}</span>` : '<span class="muted">never</span>'}</td>` : ''}<td style="min-width:180px">${lr}</td></tr>`;
-        }).join('') || '<tr><td colspan="${hist ? 6 : 4}" class="empty">No people yet — add your mentees in People.</td></tr>'}
+        }).join('') || `<tr><td colspan="${hist ? 6 : 4}" class="empty">No people yet — add your mentees in People.</td></tr>`}
         </tbody></table></div></div>`;
   }
 
@@ -892,9 +1398,9 @@
       ['Local docs', (p.localDocs || []).map(d => `<span class="mono small">${esc(d.path)}</span> <span class="muted small">— ${esc(d.what)}</span>`).join('<br>')],
       ['Updated', esc(p.updatedOn)],
     ].filter(([, v]) => v);
-    const src = ciSource(id), lr = src ? headlineRun(src) : null, tab = S.route.tab === 'ci' ? 'ci' : '';
-    const nLive = src ? liveRuns(src).length : 0;
-    const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} was running</span>` : lr ? ' ' + resultPill(lr) : ''}</button></div>`;
+    const src = ciSource(id), lr = src ? headlineRun(src) : null, tab = ['ci', 'tests'].includes(S.route.tab) ? S.route.tab : '';
+    const nLive = src ? liveRuns(src).length : 0, cat = S.catalogs[id];
+    const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} was running</span>` : lr ? ' ' + resultPill(lr) : ''}</button>${cat ? `<button class="${tab === 'tests' ? 'active' : ''}" data-href="#/projects/${esc(id)}/tests">Tests${cat.error ? '' : ` <span class="pill">${cat.tests.length}</span>`}</button>` : ''}</div>`;
     const verdict = src && src.verdict ? `<div class="sub" style="margin-top:4px"><b>${esc(src.verdict)}</b> <span class="muted">kept current by the collector</span></div>` : '';
     const seen = (p.checkedAgainst || []).filter(Boolean);
     const written = p.updatedOn
@@ -904,7 +1410,8 @@
       : '';
     const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}${written}</div>${verdict}</div>
       <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button>` : ''}<button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button></div></div>`;
-    if (tab === 'ci') return head + tabs + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
+    if (tab === 'ci') return head + tabs + (src ? latestReports(p, src) : '') + waitsBox(id) + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
+    if (tab === 'tests') return head + tabs + vProjectTests(p);
     return head + tabs + `${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}
       <div class="grid cols-2">
         <div class="card"><h3>Overview</h3><p>${esc(p.summary || '')}</p><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>${p.notes ? `<h3 style="margin-top:12px">Notes</h3><p class="small" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}</div>
@@ -929,6 +1436,23 @@
   const mayRun = (s, g) => !g.restricted || S.backend === 'server' || (s.allowedActors || []).some(a => a.toLowerCase() === actorLogin());
   const runsOfGroup = (s, gid) => runsOf(s).filter(r => r.group === gid);
 
+  // One click per environment to the newest finished run's report; an older run stands in only
+  // when the newest has none the page can show, and its date says so.
+  function latestReports(p, s) {
+    const items = (s.groups || []).map(g => {
+      const done = runsOfGroup(s, g.id).filter(isFinished);
+      const r = newestInline(s, g.id) || done.find(x => (x.reports || []).length);
+      if (!r) return '';
+      const i = firstInline(r), older = done[0] && done[0] !== r;
+      const inner = `<span class="rc-name">${esc(groupName(g))}</span>${resultPill(r)}<span class="muted${older ? ' rc-older' : ''}" title="${older ? 'a newer run has no report that opens here' : ''}">${esc(fmtWhen(r.startedAt))}${older ? ' · older run' : ''}</span>`;
+      return i >= 0
+        ? reportBtn(p.id, String(r.id), r.reports[i], i, `${inner}<span class="rc-go">Report</span>`, 'rchip')
+        : `<a class="rchip" href="${esc(r.reports[0].url)}" target="_blank" rel="noopener" title="${esc(r.reports[0].name || 'Report')}, opens in a new tab">${inner}<span class="rc-go">${esc(r.reports[0].name || 'Report')} ↗</span></a>`;
+    }).filter(Boolean);
+    if (!items.length) return '';
+    return `<div class="card latest-reports" style="margin-bottom:14px"><h3>Latest reports</h3><div class="rstrip">${items.join('')}</div>${s.reportsError ? `<div class="small" style="color:var(--yellow-text);margin-top:8px">Some reports could not be stored for viewing here: ${esc(s.reportsError)}</div>` : ''}</div>`;
+  }
+
   function vProjectCI(p) {
     const s = ciSource(p.id);
     if (!s) return `<div class="card"><div class="empty">No CI source is configured for this project. Add it to <span class="mono">ci-sources.json</span> in the tracker repository and run the collector.</div></div>`;
@@ -946,22 +1470,24 @@
         <dt>Read from the source</dt><dd>${s.collectedAt ? `${esc(fmtWhen(s.collectedAt))} UTC <span class="muted">(${snapMinutes() != null && snapMinutes() < 180 ? esc(snapMinutes() + ' min ago') : esc(agoIso(s.collectedAt))})</span>${snapMinutes() > 75 ? ' ' + pill('red', 'the hourly collection is not running') : ''}` : '<span class="muted">never</span>'}</dd>
         ${s.error ? `<dt>Error</dt><dd class="small" style="color:var(--red-text)">${esc(s.error)}</dd>` : ''}
         ${s.note ? `<dt>Note</dt><dd class="small">${esc(s.note)}</dd>` : ''}
-        ${(s.reports || []).length ? `<dt>Reports</dt><dd>${s.reports.map(r => link(r.url, r.name)).join(' · ')}</dd>` : ''}
+        ${(s.reports || []).length ? `<dt>Reports</dt><dd class="rep-list">${reportLinks(p.id, '', s.reports)}</dd>` : ''}
         ${(s.downloads || []).length ? `<dt>Downloads</dt><dd>${s.downloads.map(d => `${link(d.url, d.name)} <span class="muted small">${d.size ? Math.round(d.size / 1024) + ' KB' : ''}${d.createdAt ? ' · ' + esc(fmtWhen(d.createdAt)) : ''}</span>`).join('<br>')}</dd>` : ''}
       </dl></div>`;
     const runRow = r => `<tr><td class="nowrap small">${esc(fmtWhen(r.startedAt))}<div class="muted">${esc(agoIso(r.startedAt))}</div></td>
       <td><b>${esc(r.name || '')}</b>${r.title && r.title !== r.name ? `<div class="muted small">${esc(trunc(r.title, 90))}</div>` : ''}${r.number ? `<div class="muted small">#${esc(String(r.number))}</div>` : ''}</td>
       <td class="small">${esc(r.trigger || '')}${r.branch ? `<div class="muted">${esc(r.branch)}</div>` : ''}</td><td>${resultPill(r)}</td>
       <td class="small">${r.counts ? esc(countsText(r.counts)) : '<span class="muted">—</span>'}</td><td class="small nowrap">${esc(fmtDur(r.durationSec))}</td>
-      <td class="small">${r.url ? link(r.url, 'run') : ''}${(r.reports || []).map(x => ' · ' + link(x.url, x.name)).join('')}</td></tr>`;
+      <td class="small nowrap">${reportLinks(p.id, String(r.id), r.reports, 'Report')}${(r.reports || []).length && r.url ? ' · ' : ''}${r.url ? link(r.url, 'run') : ''}</td></tr>`;
 
     // one block per kind (regression / load / suite / deploy), one row per environment
     const kinds = [...new Set(groups.map(g => g.kind))];
     const blocks = kinds.map(kind => {
       const rows = groups.filter(g => g.kind === kind).map(g => {
         const gr = runsOfGroup(s, g.id), last = gr[0];
-        const allure = last ? (last.reports || []).map(x => link(x.url, 'Allure')).join(' ') : '';
-        const groupAllure = allure || (gr.find(r => (r.reports || []).length) ? `<span class="muted small">last with a report: ${link(gr.find(r => (r.reports || []).length).reports[0].url, esc(fmtWhen(gr.find(r => (r.reports || []).length).startedAt)))}</span>` : '<span class="muted">—</span>');
+        const withRep = last && (last.reports || []).length ? last : gr.find(r => (r.reports || []).length);
+        const groupAllure = !withRep ? '<span class="muted">—</span>'
+          : withRep === last ? reportLinks(p.id, String(last.id), last.reports, 'Report')
+          : `<div class="muted small">last with a report, ${esc(fmtWhen(withRep.startedAt))}:</div>${reportLinks(p.id, String(withRep.id), withRep.reports, 'Report')}`;
         const history = gr.slice(1, 6).map(r => {
           const res = runResult(r), mark = /success/.test(res) ? '●' : /fail|error|timed/.test(res) ? '✕' : '·';
           const cls = /success/.test(res) ? 'var(--green-text)' : /fail|error|timed/.test(res) ? 'var(--red-text)' : 'var(--muted)';
@@ -987,14 +1513,113 @@
       <div class="card tbl-wrap" style="margin-top:8px"><table class="tbl"><thead><tr><th>When (UTC)</th><th>Job</th><th>Trigger</th><th>Result</th><th>Tests</th><th>Duration</th><th>Open</th></tr></thead><tbody>${runs.map(runRow).join('')}</tbody></table></div></details>` : '';
     const empty = !groups.length ? `<div class="card"><div class="empty">${s.status === 'error' ? 'The collector could not read this source, so there is nothing to group yet.' : 'No jobs matched the classification rules for this source.'}</div></div>` : '';
     return head + blocks + empty + flat +
-      `<p class="hint" style="margin-top:10px">Allure opens in a new tab; save it from there. “Run” starts the job through the tracker's own workflow, so the token in this browser never needs access to the project's repository. A started run appears here after the next collection.</p>`;
+      `<p class="hint" style="margin-top:10px">“Report” shows the run's report inside this page; ↗ opens it in a new tab, where it can be saved. “Run” starts the job through the tracker's own workflow, so the token in this browser never needs access to the project's repository. A card at the top then follows the run: while the page stays open, it collects when the run usually ends (and once earlier when past runs often stopped early), then at most twice more, so one press costs at most four collections, and a collection anyone else starts meanwhile counts as one of them. The card turns into “Report ready” when the report is in.</p>`;
+  }
+
+  // ---------- the Tests tab: one card per test in the project's catalogue
+  const TEST_KIND = { ui: 'UI', http: 'HTTP' };
+  const testKind = k => TEST_KIND[k] || label(k) || 'Other';
+  const KIND_PILL = { ui: 'accent', http: 'purple' };
+  const MARKER = {
+    xfail: ['red', 'Expected to fail until a known defect is fixed'],
+    skipif: ['grey', 'Skipped when a condition holds'],
+    skip: ['grey', 'Skipped'],
+    writes: ['yellow', 'Changes data on the environment it runs against'],
+  };
+  const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const catTerms = q => String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  // Wraps every search term in <mark>; the text around it is escaped as everywhere else.
+  const hl = (s, re) => re ? String(s ?? '').split(re).map((part, i) => i % 2 ? `<mark>${esc(part)}</mark>` : esc(part)).join('') : esc(s);
+  const catFilterOf = pid => S.catFilter[pid] ||= { q: '', kind: '', area: '' };
+  const tally = (tests, key) => tests.reduce((m, t) => m.set(t[key], (m.get(t[key]) || 0) + 1), new Map());
+  // The source links point into the repository at the catalogued commit; the part up to the
+  // commit is the whole tree at that commit.
+  function catTreeUrl(cat) {
+    const u = (cat.tests.find(t => /^https:\/\//.test(t.sourceUrl)) || {}).sourceUrl || '';
+    const i = /^[0-9a-f]{7,40}$/.test(cat.commit) ? u.indexOf(`/${cat.commit}/`) : -1;
+    return i > 0 ? u.slice(0, i + cat.commit.length + 2) : '';
+  }
+
+  function testCard(t, cat, re) {
+    const h = s => hl(s, re);
+    const src = /^https:\/\//.test(t.sourceUrl) ? t.sourceUrl : '';
+    const chips = [`<span class="pill ${KIND_PILL[t.kind] || ''}">${esc(testKind(t.kind))}</span>`]
+      .concat(t.markers.map(m => { const [cls, tip] = MARKER[m] || ['', '']; return `<span class="pill ${cls}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(m)}</span>`; }));
+    return `<article class="card tc">
+      <h3 class="tc-title">${h(t.title)}</h3>
+      <div class="tc-chips">${chips.join('')}</div>
+      ${t.does ? `<h4>What it does</h4><p>${h(t.does)}</p>` : ''}
+      ${t.checks.length ? `<h4>What it checks</h4><ul class="plain">${t.checks.map(c => `<li>${h(c)}</li>`).join('')}</ul>` : ''}
+      ${t.needs ? `<h4>Needs</h4><p>${h(t.needs)}</p>` : ''}
+      ${t.params.length ? `<h4>Runs once for each parameter</h4><div class="tc-chips">${t.params.map(x => `<span class="chip mono" title="${esc(`${t.nodeid}[${x}]`)}">${esc(x)}</span>`).join('')}</div>` : ''}
+      <div class="tc-foot"><span class="mono tc-path">${h(t.nodeid || t.file)}</span>${src ? `<a href="${esc(src)}" target="_blank" rel="noopener">Source${cat.commit ? ' at ' + esc(cat.commit.slice(0, 7)) : ''} ↗</a>` : ''}</div>
+    </article>`;
+  }
+
+  function catalogList(pid) {
+    const cat = S.catalogs[pid], f = catFilterOf(pid), terms = catTerms(f.q);
+    const shown = cat.tests.filter(t => (!f.kind || t.kind === f.kind) && (!f.area || t.area === f.area) && terms.every(w => t.hay.includes(w)));
+    const re = terms.length ? new RegExp(`(${terms.slice().sort((a, b) => b.length - a.length).map(reEsc).join('|')})`, 'gi') : null;
+    const areas = [...new Set(shown.map(t => t.area))].sort((a, b) => a.localeCompare(b));
+    const html = areas.map(a => {
+      const ts = shown.filter(t => t.area === a);
+      return `<section class="cat-area" data-area="${esc(a)}"><h2>${esc(a)} <span class="muted small">${ts.length}</span></h2>${ts.map(t => testCard(t, cat, re)).join('')}</section>`;
+    }).join('') || `<div class="card"><div class="empty">No test matches. <button class="btn sm" data-act="cat-clear" data-project="${esc(pid)}">Clear the search and filters</button></div></div>`;
+    const n = cat.tests.length;
+    return { html, text: shown.length === n ? `All ${n} test${n === 1 ? '' : 's'}, grouped by area` : `${shown.length} of ${n} tests match` };
+  }
+  function paintCatalog(pid) {
+    const box = $('[data-cat-list]');
+    if (!box || !S.catalogs[pid]) return;
+    const { html, text } = catalogList(pid);
+    box.innerHTML = html;
+    const c = $('[data-cat-count]'); if (c) c.textContent = text;
+  }
+
+  function vProjectTests(p) {
+    const cat = S.catalogs[p.id];
+    if (cat === undefined) return '<div class="card"><div class="empty" role="status">Loading the test catalogue…</div></div>';
+    if (!cat) return `<div class="card"><div class="empty">This project has no test catalogue. It appears here once <span class="mono">data/catalog/${esc(p.id)}.json</span> is in the tracker repository.</div></div>`;
+    if (cat.error) return `<div class="card"><div class="empty">The test catalogue could not be read: ${esc(cat.error)}</div></div>`;
+    const f = catFilterOf(p.id), n = cat.tests.length, kinds = tally(cat.tests, 'kind'), areas = tally(cat.tests, 'area');
+    if (f.kind && !kinds.has(f.kind)) f.kind = '';
+    if (f.area && !areas.has(f.area)) f.area = '';
+    const cases = cat.tests.reduce((k, t) => k + Math.max(1, t.params.length), 0);
+    const tree = catTreeUrl(cat), short = cat.commit.slice(0, 7);
+    const opts = (m, cur, lab) => [...m.keys()].sort((a, b) => a.localeCompare(b)).map(k => `<option value="${esc(k)}"${k === cur ? ' selected' : ''}>${esc(lab(k))} (${m.get(k)})</option>`).join('');
+    const pid = esc(p.id), list = catalogList(p.id);
+    const meta = [
+      cat.repo ? `${esc(cat.repo)}${cat.branch ? ` <span class="pill">${esc(cat.branch)}</span>` : ''}` : '',
+      short ? `commit ${tree ? `<a class="mono" href="${esc(tree)}" target="_blank" rel="noopener" title="${esc(cat.commit)}">${esc(short)}</a>` : `<span class="mono" title="${esc(cat.commit)}">${esc(short)}</span>`}` : '',
+      cat.generatedAt ? `<span title="${esc(fmtWhen(cat.generatedAt))} UTC">catalogued ${esc(ago(dayOf(cat.generatedAt)))}, refreshed weekly</span>` : 'refreshed weekly',
+    ].filter(Boolean).join(' · ');
+    const summary = [...[...kinds].map(([k, c]) => `${c} ${esc(testKind(k))}`), `${areas.size} area${areas.size === 1 ? '' : 's'}`, cases !== n ? `${cases} cases once parameters are expanded` : ''].filter(Boolean).join(' · ');
+    return `<div class="catalog">
+      <div class="card cat-head">
+        <div class="cat-count"><b>${n}</b> test${n === 1 ? '' : 's'} <span class="muted">· ${summary}</span></div>
+        <div class="small muted">${meta}</div>
+      </div>
+      <div class="filters cat-filters" role="search">
+        <input type="search" data-cf="q" data-project="${pid}" value="${esc(f.q)}" placeholder="Search titles, descriptions, checks, files" aria-label="Search the tests">
+        <select data-cf="kind" data-project="${pid}" aria-label="Kind of test"><option value="">all kinds</option>${opts(kinds, f.kind, testKind)}</select>
+        <select data-cf="area" data-project="${pid}" aria-label="Area"><option value="">all areas</option>${opts(areas, f.area, a => a)}</select>
+      </div>
+      <div class="hint cat-shown" data-cat-count aria-live="polite">${esc(list.text)}</div>
+      <div data-cat-list>${list.html}</div>
+      <p class="hint">Each card describes a test as its code stands at the commit above; “Source” opens that code.</p>
+    </div>`;
   }
 
   function vCI() {
     const c = ci(), age = ciAge();
     const rows = projects().filter(p => p.status !== 'done').map(p => {
       const s = ciSource(p.id), t = s && s.tests;
-      const cells = s ? (s.groups || []).map(g => { const r = runsOf(s).find(x => x.group === g.id); return r ? `<div class="small" style="margin:2px 0">${resultPill(r)} <span class="muted">${esc(KIND_TITLE[g.kind] || g.kind)} ${esc(g.env || '')} · ${esc(agoIso(r.startedAt))}</span></div>` : ''; }).join('') : '';
+      const cells = s ? (s.groups || []).map(g => {
+        const r = runsOf(s).find(x => x.group === g.id); if (!r) return '';
+        const rr = newestInline(s, g.id), i = firstInline(rr);
+        const rep = rr ? ` ${reportBtn(p.id, String(rr.id), rr.reports[i], i, 'Report', 'btn sm')}` : '';
+        return `<div class="small ci-cell">${resultPill(r)} <span class="muted">${esc(KIND_TITLE[g.kind] || g.kind)} ${esc(g.env || '')} · ${esc(agoIso(r.startedAt))}</span>${rep}</div>`;
+      }).join('') : '';
       return `<tr><td>${prlink(p.id)}<div class="muted small">${esc(p.code || '')}</div></td>
         <td class="small">${s ? `${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')}${s.note ? `<div class="muted">${esc(trunc(s.note, 90))}</div>` : ''}` : '<span class="muted">no source configured</span>'}</td>
         <td>${t ? `<b>${esc(String(t.functions))}</b> <span class="muted small">in ${esc(String(t.files))} files</span>` : '<span class="muted">—</span>'}</td>
@@ -1006,7 +1631,8 @@
     return `<div class="page-head"><div><h1>CI</h1><div class="sub">${c.collectedAt ? `snapshot from ${esc(fmtWhen(c.collectedAt))} UTC (${esc(agoIso(c.collectedAt))})` : 'nothing collected yet'} · collected hourly, or on demand</div></div>
       <div class="actions"><button class="btn primary" data-act="refresh-ci">↻ Refresh now</button></div></div>
       ${age && age.stale ? `<div class="banner">The CI snapshot is ${Math.round(age.hours)} hours old. Check the “Collect CI status” workflow in the tracker repository.</div>` : ''}
-      ${live.length ? `<div class="card live" style="margin-bottom:14px"><h3><span class="live-dot"></span> Was running at the last check ${pill(snapMinutes() > 10 ? 'red' : 'yellow', snapMinutes() == null ? 'no snapshot' : `${snapMinutes()} min ago`)}</h3>${live.map(({ s, r }) => `<div class="row"><div class="body"><b>${esc(r.name || '')}</b> ${pill('accent', r.activeEnv || r.env || 'running')} ${(r.activeJobs || []).length ? `<span class="small">on at the time: ${(r.activeJobs || []).map(j => `<span class="mono">${esc(j.name)}</span>`).join(', ')}</span>` : ''}<div class="muted small">${esc(s.repoName || '')} · had been running ${esc(elapsed(r.startedAt))}</div></div><div class="ops">${r.url ? link(r.url, 'watch') : ''}</div></div>`).join('')}</div>` : ''}
+      ${waitsBox('')}
+      ${live.length ? `<div class="card live" style="margin-bottom:14px"><h3><span class="live-dot"></span> Was running at the last check ${pill(snapMinutes() > 10 ? 'red' : 'yellow', snapMinutes() == null ? 'no snapshot' : `${snapMinutes()} min ago`)}</h3>${live.map(({ s, r }) => `<div class="row"><div class="body"><b>${esc(r.name || '')}</b> ${pill('accent', r.activeEnv || r.env || 'running')} ${(r.activeJobs || []).length ? `<span class="small">on at the time: ${(r.activeJobs || []).map(j => `<span class="mono">${esc(j.name)}</span>`).join(', ')}</span>` : ''}<div class="muted small">${esc(s.repoName || '')} · had been running ${esc(elapsed(r.startedAt))}</div></div><div class="ops">${reportLinks(s.projectId, String(r.id), r.reports, 'Report')}${r.url ? link(r.url, 'watch') : ''}</div></div>`).join('')}</div>` : ''}
       <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Repository</th><th>Test functions</th><th>Last run</th><th>Collected</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">No projects.</td></tr>'}</tbody></table></div>
       <p class="hint" style="margin-top:10px">Test functions = <span class="mono">def test_</span> in the repository's test folder at the counted commit; the last-run numbers are what CI actually executed (parametrized cases count separately).</p>`;
   }
@@ -1015,8 +1641,8 @@
     return `<div class="page-head"><div><h1>People</h1><div class="sub">${mentees().length} mentee${mentees().length === 1 ? '' : 's'} · ${people().length} total</div></div><div class="actions"><button class="btn primary" data-act="new-person">Add person</button></div></div>
       <div class="grid auto">${people().slice().sort((a, b) => (a.active === false) - (b.active === false) || (a.role === 'mentee' ? 0 : 1) - (b.role === 'mentee' ? 0 : 1)).map(p => {
         const o = lastOneOnOne(p.id), prs = personProjects(p.id);
-        const lr = enrollmentsOf(p.id).map(e => courseSummary(p.id, e.courseId)).filter(Boolean);
-        return `<div class="card clickable" data-href="#/people/${esc(p.id)}"><h3><a href="#/people/${esc(p.id)}">${esc(p.name)}</a> ${p.active === false ? pill('grey', 'inactive') : ''}${p.role !== 'mentee' ? pill('accent', label(p.role)) : ''}${p.track ? pill('purple', p.track) : ''}</h3>
+        const lr = canSeeLearningOf(p.id) ? enrollmentsOf(p.id).map(e => courseSummary(p.id, e.courseId)).filter(Boolean) : [];
+        return `<div class="card clickable" data-href="#/people/${esc(p.id)}"><h3><a href="#/people/${esc(p.id)}">${esc(p.name)}</a> ${p.active === false ? pill('grey', 'inactive') : ''}${p.role !== 'mentee' ? pill('accent', label(p.role)) : ''}${p.track && canSeeLearningOf(p.id) ? pill('purple', p.track) : ''}</h3>
           <div class="meta">${esc(p.title || '')}${p.startedOn ? ` · since ${esc(p.startedOn)}` : ''}</div>
           ${p.focus ? `<p class="small" style="margin-top:6px"><span class="muted">Focus:</span> ${esc(p.focus)}</p>` : ''}
           <div class="small"><span class="muted">Projects:</span> ${prs.map(x => esc(x.name)).join(', ') || '—'}</div>
@@ -1024,6 +1650,22 @@
           ${lr.map(cs => `<div class="small" style="margin-top:6px"><b>${cs.pct}%</b> ${esc(cs.course.name)}${cs.current ? ` · <span class="muted">${esc(cs.current.title)}</span>` : ''}</div>${progressBar(cs)}`).join('')}
         </div>`;
       }).join('') || '<div class="empty">No people yet.</div>'}</div>`;
+  }
+
+  // First times, as everywhere; a finish after a reset and the reset itself are shown as well.
+  function lessonDatesCell(pr, empty = '<span class="muted">—</span>') {
+    const d = lessonDates(pr), runs = marksOf(pr), out = [], lastRun = runs[runs.length - 1];
+    let i = runs.length;
+    while (i > 0 && FINISHED.has(runs[i - 1].status)) i--;
+    const again = i > 0 && i < runs.length ? runs[i].when : '';
+    if (pr.status !== 'not-started' && d.startedAt) out.push(['started', d.startedAt]);
+    if (FINISHED.has(pr.status) && d.doneAt) out.push(['finished', d.doneAt]);
+    if (FINISHED.has(pr.status) && again && dayOf(again) !== dayOf(d.doneAt)) out.push(['finished again', again]);
+    if (pr.status === 'gate-passed' && d.gatePassedAt) out.push(['gate passed', d.gatePassedAt]);
+    if (pr.status === 'stuck' && pr.date) out.push(['stuck since', pr.date]);
+    if (pr.status === 'not-started' && lastRun && lastRun.status === 'not-started') out.push(['reset', lastRun.when]);
+    const trail = runs.map(r => `${whenLocal(r.at)} ${label(r.status)}${r.when !== r.at ? ` (for ${dayOf(r.when)})` : ''}`).join('\n');
+    return out.length ? `<div class="lesson-dates" title="${esc(trail)}">${out.map(([k, v]) => `<div><span class="muted">${k}</span> <span class="nowrap">${esc(dayOf(v))}</span></div>`).join('')}</div>` : empty;
   }
 
   function learningBlock(id, e) {
@@ -1035,11 +1677,12 @@
       ${cs.current ? `<div class="small" style="margin-bottom:8px"><span class="muted">Now on:</span> <b>${esc(cs.current.title)}</b> <span class="muted">(${esc(cs.current.phaseName)})</span></div>` : '<div class="small" style="margin-bottom:8px">Course complete.</div>'}
       ${(c.phases || []).map(ph => { const ls = ph.lessons || []; const done = ls.filter(l => ['done', 'gate-passed'].includes(progressOf(id, l.id).status)).length;
         return `<details data-phase="${esc(c.id + ':' + ph.id)}" ${ls.some(l => l.id === cs.current?.id) ? 'open' : ''}><summary class="small"><b>${esc(ph.name)}</b> <span class="muted">${done}/${ls.length}</span></summary>
-          <div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Lesson</th><th>Status</th><th>Marked</th><th>Note</th><th></th></tr></thead><tbody>${ls.map(l => { const pr = progressOf(id, l.id); return `<tr><td class="lesson-name">${esc(l.title)}${l.gate ? `<div class="muted" style="font-size:.75rem">gate: ${esc(l.gate)}</div>` : ''}</td><td><select class="lesson-status" data-person="${esc(id)}" data-lesson="${esc(l.id)}">${LESSON_STATUS.map(st => `<option value="${st}"${pr.status === st ? ' selected' : ''}>${label(st)}</option>`).join('')}</select></td><td class="muted nowrap">${esc(pr.date || '')}</td><td class="muted">${esc(pr.note || '')}</td><td><button class="btn sm" data-act="edit-lesson" data-person="${esc(id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="note or date">note</button></td></tr>`; }).join('')}</tbody></table></div></details>`; }).join('')}
+          <div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Lesson</th><th>Status</th><th class="col-dates">Dates</th><th>Note</th><th></th></tr></thead><tbody>${ls.map(l => { const pr = progressOf(id, l.id), onPhone = lessonDatesCell(pr, ''); return `<tr><td class="lesson-name">${esc(l.title)}${l.gate ? `<div class="muted" style="font-size:.75rem">gate: ${esc(l.gate)}</div>` : ''}</td><td><select class="lesson-status" data-person="${esc(id)}" data-lesson="${esc(l.id)}">${LESSON_STATUS.map(st => `<option value="${st}"${pr.status === st ? ' selected' : ''}>${label(st)}</option>`).join('')}</select>${onPhone ? `<div class="small dates-m">${onPhone}</div>` : ''}</td><td class="small nowrap col-dates">${lessonDatesCell(pr)}</td><td class="muted">${esc(pr.note || '')}</td><td><button class="btn sm" data-act="edit-lesson" data-person="${esc(id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="note or date">note</button></td></tr>`; }).join('')}</tbody></table></div></details>`; }).join('')}
     </div>`;
   }
 
   function vPersonLearning(p) {
+    if (!canSeeLearningOf(p.id)) return '<div class="card"><div class="empty">Learning progress is visible only to the person and the lead.</div></div>';
     const enr = enrollmentsOf(p.id);
     if (!enr.length) return `<div class="card"><div class="empty">Not enrolled in any course yet. Use \u201cEnroll in course\u201d above.</div></div>`;
     return enr.map(e => learningBlock(p.id, e)).join('');
@@ -1061,14 +1704,14 @@
   function vPerson(id) {
     const p = person(id); if (!p) return `<div class="empty">Person not found. <a href="#/people">Back</a></div>`;
     const pa = personActs(id), ones = pa.filter(a => a.type === 'one-on-one'), others = pa.filter(a => a.type !== 'one-on-one');
-    const prs = personProjects(id), enr = enrollmentsOf(id), nq = openAsks(id).length;
-    const kv = [['Role', label(p.role)], ['Title', p.title], ['GitHub', p.githubLogin], ['Track', p.track && label(p.track)], ['Started', p.startedOn], ['Learning h/week', p.weeklyLearningHours], ['Focus', p.focus]].filter(([, v]) => v !== undefined && v !== null && v !== '');
-    const tab = ['learning', 'questions'].includes(S.route.tab) ? S.route.tab : '';
+    const seeL = canSeeLearningOf(id), prs = personProjects(id), enr = seeL ? enrollmentsOf(id) : [], nq = openAsks(id).length;
+    const kv = [['Role', label(p.role)], ['Title', p.title], ['GitHub', p.githubLogin], ['Track', seeL && p.track ? label(p.track) : ''], ['Started', p.startedOn], ['Learning h/week', seeL ? p.weeklyLearningHours : ''], ['Focus', p.focus]].filter(([, v]) => v !== undefined && v !== null && v !== '');
+    const tab = S.route.tab === 'questions' || (S.route.tab === 'learning' && seeL) ? S.route.tab : '';
     const head = `<div class="page-head"><div><h1>${esc(p.name)} ${p.active === false ? pill('grey', 'inactive') : ''}${viewerId() === id ? ' ' + pill('accent', 'you') : ''}</h1><div class="sub">${esc(p.title || label(p.role))}</div></div>
-      <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-11" data-person="${esc(id)}">Log 1:1</button><button class="btn" data-act="log-act" data-person="${esc(id)}">Log activity</button>` : ''}<button class="btn" data-act="enroll" data-person="${esc(id)}">Enroll in course</button><button class="btn primary" data-act="edit-person" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-person" data-id="${esc(id)}">Remove</button></div></div>
+      <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-11" data-person="${esc(id)}">Log 1:1</button><button class="btn" data-act="log-act" data-person="${esc(id)}">Log activity</button>` : ''}${seeL ? `<button class="btn" data-act="enroll" data-person="${esc(id)}">Enroll in course</button>` : ''}<button class="btn primary" data-act="edit-person" data-id="${esc(id)}">Edit</button><button class="btn danger ghost" data-act="del-person" data-id="${esc(id)}">Remove</button></div></div>
       <div class="tabs">
         <button class="${tab ? '' : 'active'}" data-href="#/people/${esc(id)}">Profile</button>
-        <button class="${tab === 'learning' ? 'active' : ''}" data-href="#/people/${esc(id)}/learning">Learning${enr.length ? ` <span class="pill">${enr.length}</span>` : ''}</button>
+        ${seeL ? `<button class="${tab === 'learning' ? 'active' : ''}" data-href="#/people/${esc(id)}/learning">Learning${enr.length ? ` <span class="pill">${enr.length}</span>` : ''}</button>` : ''}
         <button class="${tab === 'questions' ? 'active' : ''}" data-href="#/people/${esc(id)}/questions">Questions${nq ? ` <span class="pill yellow">${nq} open</span>` : threadOf(id).length ? ` <span class="pill">${threadOf(id).length}</span>` : ''}</button>
       </div>`;
 
@@ -1080,7 +1723,7 @@
         <div><div class="card" style="margin-bottom:14px"><h3>Profile</h3><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div>
           <div class="card" style="margin-bottom:14px"><h3>Projects</h3>${prs.length ? `<ul class="plain">${prs.map(pr => `<li>${prlink(pr.id)} <span class="muted small">\u2014 ${esc(personRoleIn(pr, id))}</span> ${dot(pr.health)} ${pill(pr.status)}</li>`).join('')}</ul>` : '<div class="empty">Not assigned to any project. Set them as lead or member in the project.</div>'}</div>
           ${canSeeHistory() ? `<div class="card"><div class="section-head"><h3>1:1 journal</h3><span class="hint">${ones.length} entries</span></div>${ones.length ? ones.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">No 1:1 logged yet.</div>'}</div>` : ''}</div>
-        <div><div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Learning</h3><a class="btn sm" href="#/people/${esc(id)}/learning">open</a></div>${summary || '<div class="empty">Not enrolled in any course.</div>'}</div>
+        <div>${seeL ? `<div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Learning</h3><a class="btn sm" href="#/people/${esc(id)}/learning">open</a></div>${summary || '<div class="empty">Not enrolled in any course.</div>'}</div>` : ''}
           <div class="card" style="margin-bottom:14px"><div class="section-head"><h3>Questions</h3><a class="btn sm" href="#/people/${esc(id)}/questions">open</a></div>${nq ? openAsks(id).slice(0, 3).map(m => `<div class="row"><div class="body"><div class="txt small">${esc(trunc(m.text, 120))}</div><div class="muted small">${esc(pname(m.authorId))} \u00b7 ${esc(fmtWhen(m.at))}</div></div></div>`).join('') : `<div class="empty">${threadOf(id).length ? 'No open questions.' : 'Nothing asked yet.'}</div>`}</div>
           ${canSeeHistory() ? `<div class="card"><div class="section-head"><h3>Other activity</h3></div>${others.length ? others.map(a => actRow(a, { showPerson: false })).join('') : '<div class="empty">Nothing logged.</div>'}</div>` : ''}</div>
       </div>`;
@@ -1090,12 +1733,12 @@
     const cs = courses(); if (!cs.length) return `<h1>Learning</h1><div class="empty">No curriculum loaded (data/curriculum.json).</div>`;
     const c = course(courseId) || cs[0];
     const ls = lessonsOf(c);
-    const enrolled = learning().enrollments.filter(e => e.courseId === c.id).map(e => person(e.personId)).filter(Boolean);
+    const enrolled = learning().enrollments.filter(e => e.courseId === c.id).map(e => person(e.personId)).filter(Boolean).filter(p => canSeeLearningOf(p.id));
     // the rotated header is as tall as the longest lesson title needs, so nothing is clipped
     const headH = Math.min(520, Math.max(150, Math.round(ls.reduce((n, l) => Math.max(n, (l.title || '').length), 0) * 7.1) + 18));
     const cols = (c.phases || []).map(ph => `<th colspan="${(ph.lessons || []).length}" title="${esc(ph.name)}${ph.weeks ? ' · ' + esc(ph.weeks) : ''}">${esc(ph.name)}</th>`).join('');
     const rows = enrolled.map(p => { const sm = courseSummary(p.id, c.id); return `<tr><th class="person">${plink(p.id)}<div class="muted" style="font-weight:400">${sm.pct}% · ${sm.complete}/${sm.total}</div></th>${ls.map(l => { const pr = progressOf(p.id, l.id); return `<td class="cell ${pr.status}${sm.current?.id === l.id ? ' current' : ''}" data-person="${esc(p.id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="${esc(l.title)} — ${label(pr.status)}${pr.date ? ' · ' + esc(pr.date) : ''}${pr.note ? '&#10;' + esc(pr.note) : ''}">${LESSON_GLYPH[pr.status] || ''}</td>`; }).join('')}</tr>`; }).join('');
-    return `<div class="page-head"><div><h1>Learning</h1><div class="sub">${cs.length} course${cs.length === 1 ? '' : 's'} · tap a cell to advance its status; right-click, shift-click or long-press to set a note or date</div></div>
+    return `<div class="page-head"><div><h1>Learning</h1><div class="sub">${cs.length} course${cs.length === 1 ? '' : 's'} · tap a cell to advance its status; right-click, shift-click or long-press to set a note or date${canSeeHistory() ? '' : ' · only your own progress is shown'}</div></div>
       <div class="actions"><button class="btn primary" data-act="enroll-any" data-course="${esc(c.id)}">Enroll someone</button></div></div>
       <div class="tabs">${cs.map(x => `<button class="${x.id === c.id ? 'active' : ''}" data-href="#/learning/${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>
       <div class="card" style="margin-bottom:14px"><h3>${esc(c.name)} <span class="pill">${esc(c.audience || '')}</span></h3><p class="small">${esc(c.description || '')}</p>
@@ -1106,7 +1749,7 @@
       </div>
       <div class="legend"><span><span class="sw" style="background:transparent"></span>not started</span><span><span class="sw" style="background:color-mix(in srgb,var(--yellow) 45%,transparent)"></span>in progress</span><span><span class="sw" style="background:color-mix(in srgb,var(--green) 55%,transparent)"></span>done</span><span><span class="sw" style="background:var(--green)"></span>★ gate passed</span><span><span class="sw" style="background:color-mix(in srgb,var(--red) 60%,transparent)"></span>! stuck</span><span><span class="sw" style="box-shadow:inset 0 0 0 2px var(--accent)"></span>current lesson</span></div>
       <div class="hint" style="margin-top:8px" aria-live="polite">${S.lastCell ? `${esc(S.lastCell.person)} · ${esc(S.lastCell.title)} → <b>${esc(label(S.lastCell.status))}</b>` : 'The lesson and new status of the last cell you tap show here.'}</div>
-      <div class="matrix-wrap" style="margin-top:8px"><table class="matrix"><thead><tr class="phases"><th class="person"></th>${cols}</tr><tr class="lessons"><th class="person">Person</th>${ls.map(l => `<th title="${esc(l.title)}" style="height:${headH}px">${esc(l.title)}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td class="empty" colspan="${ls.length + 1}" style="padding:14px">Nobody enrolled yet — use “Enroll someone”.</td></tr>`}</tbody></table></div>
+      <div class="matrix-wrap" style="margin-top:8px"><table class="matrix"><thead><tr class="phases"><th class="person"></th>${cols}</tr><tr class="lessons"><th class="person">Person</th>${ls.map(l => `<th title="${esc(l.title)}" style="height:${headH}px">${esc(l.title)}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td class="empty" colspan="${ls.length + 1}" style="padding:14px">${canSeeHistory() ? 'Nobody enrolled yet — use “Enroll someone”.' : signedInAs() ? 'You are not enrolled in this course.' : esc(learningLock())}</td></tr>`}</tbody></table></div>
       <div class="section" style="margin-top:20px"><div class="section-head"><h2>Lesson index</h2></div><div class="card tbl-wrap"><table class="tbl small"><thead><tr><th>#</th><th>Phase</th><th>Lesson</th><th>File</th><th>Gate / capstone</th></tr></thead><tbody>${ls.map((l, i) => `<tr><td>${i + 1}</td><td class="muted">${esc(l.phaseName)}</td><td>${esc(l.title)}</td><td class="mono muted">${esc(l.file || '')}</td><td class="muted">${esc(l.gate || l.capstone || '')}</td></tr>`).join('')}</tbody></table></div></div>`;
   }
 
@@ -1134,7 +1777,7 @@
 
   function vData() {
     const st = settings();
-    const counts = COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => { const d = S.data[c]; const n = Array.isArray(d) ? d.length : c === 'curriculum' ? d.courses.length + ' courses' : c === 'learning' ? `${d.enrollments.length} enrollments, ${Object.keys(d.progress).length} marks` : '—'; return `<tr><td class="mono">${c}.json</td><td>${esc(String(n))}</td></tr>`; }).join('');
+    const counts = COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => { const d = S.data[c]; const n = Array.isArray(d) ? d.length : c === 'curriculum' ? d.courses.length + ' courses' : c === 'learning' ? (l => `${l.enrollments.length} enrollments, ${Object.keys(l.progress).length} marks${canSeeHistory() ? '' : ' (yours)'}`)(visibleLearning()) : '—'; return `<tr><td class="mono">${c}.json</td><td>${esc(String(n))}</td></tr>`; }).join('');
     const theme = localStorage.getItem(LS + 'theme') || 'auto';
     const g = ghConfig();
     const sub = S.backend === 'server' ? `Server on — writing to <span class="mono">${esc(S.dataDir)}</span>` : S.backend === 'github' ? `Connected to GitHub — every save is a commit to <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span>` : 'Not connected — edits stay in this browser until you export';
@@ -1144,7 +1787,7 @@
           <p class="small">${passwordStoreWorks()
             ? `This browser also keeps the connection in its password manager${S.restoredToken ? ', and that is where it was taken from on this visit' : ''}, so a browser that clears site data on close does not disconnect you.`
             : 'This browser keeps the connection only in its site data. If it is set to clear site data on close, you will have to connect again after closing it; Safari also clears it for a site not opened for about a week.'}</p>
-          <p class="small">${S.ghUser ? (personByLogin(S.ghUser) ? `Signed in as <b>${esc(S.ghUser)}</b>, recognised as <b>${esc(viewerName())}</b> — everything you post is signed that way.` : `Signed in as <b>${esc(S.ghUser)}</b>, but no person on the team carries that GitHub username. Put it on their profile so their posts are signed automatically.`) : 'This token does not say who owns it, so posts are signed with the name picked in the menu.'}</p><div class="actions"><button class="btn" data-act="gh-connect">Change connection</button><button class="btn danger" data-act="gh-disconnect">Forget token</button></div>`
+          <p class="small">${S.ghUser ? (personByLogin(S.ghUser) ? `Signed in as <b>${esc(S.ghUser)}</b>, recognised as <b>${esc(viewerName())}</b> — everything you post is signed that way.` : `Signed in as <b>${esc(S.ghUser)}</b>, but no person on the team carries that GitHub username. Put it on their profile so their posts are signed automatically.`) : 'This token does not say who owns it, so posts are signed with the name picked in the menu, and no learning progress is shown.'}</p><div class="actions"><button class="btn" data-act="gh-connect">Change connection</button><button class="btn danger" data-act="gh-disconnect">Forget token</button></div>`
         : `<p class="small">This page holds no data. Connect it to the private repository that does: create a personal access token on GitHub (Settings → Developer settings) and paste it here. If you were invited to the repository, it has to be a <b>classic</b> token with the <b>repo</b> scope: GitHub does not let fine-grained tokens reach another person\u2019s repositories. The owner can use a fine-grained token with <b>Contents</b> and <b>Actions: read and write</b>. It is kept in this browser only and sent only to api.github.com.</p>
           ${storageWorks() ? '' : '<div class="banner">This browser is not keeping site data, so a connection cannot be remembered here. That is what a private window or a “block site data” setting does. Open the page in a normal window.</div>'}
           ${S.ghError ? `<div class="banner">GitHub answered: ${esc(S.ghError)}</div>` : ''}<div class="actions"><button class="btn primary" data-act="gh-connect">Connect to GitHub</button></div>`}
@@ -1159,6 +1802,214 @@
           <h3 style="margin-top:14px">Theme</h3><div class="actions">${['auto', 'light', 'dark'].map(t => `<button class="btn sm ${theme === t ? 'primary' : ''}" data-theme-set="${t}">${label(t)}</button>`).join('')}</div>
           <h3 style="margin-top:14px">How this works</h3><ul class="plain small"><li><b>Projects</b> hold status, health, lead, workstreams, milestones and facts.</li><li><b>People</b> are your mentees; each project's lead is one of them.</li>${canSeeHistory() ? '<li><b>Activity</b> is the log: updates, blockers, decisions, 1:1s. It feeds “needs attention”.</li>' : ''}<li><b>Learning</b> tracks each person per lesson across the courses you handed out; gates are the checkpoints.</li><li>Everything is plain JSON in <span class="mono">data/</span>, versioned in git. Commit when you want a snapshot.</li></ul></div>
       </div>`;
+  }
+
+  // ---------- team statistics (lead only)
+  const SERIES = [
+    { color: 'var(--accent)', dash: '', shape: 'circle' },
+    { color: 'var(--yellow-text)', dash: '7 4', shape: 'square' },
+    { color: 'var(--green)', dash: '2 4', shape: 'triangle' },
+    { color: 'var(--red)', dash: '10 4 2 4', shape: 'diamond' },
+    { color: 'var(--text)', dash: '5 3', shape: 'circle' },
+    { color: 'var(--muted)', dash: '1 4', shape: 'square' },
+  ];
+  const statPeople = () => activePeople().filter(p => p.role === 'mentee' || enrollmentsOf(p.id).length);
+  function lessonIndex() {
+    const m = new Map();
+    for (const c of courses()) for (const l of lessonsOf(c)) if (!m.has(l.id)) m.set(l.id, { l, c });
+    return m;
+  }
+  const markList = () => Object.entries(learning().progress).flatMap(([k, pr]) => {
+    const i = k.indexOf('|'), pid = k.slice(0, i), lid = k.slice(i + 1);
+    return marksOf(pr).map(r => ({ pid, lid, ...r }));
+  });
+  const sortKey = at => isDay(at) ? at : (isNaN(new Date(at)) ? String(at) : localIso(new Date(at)));
+  const fmtPace = n => { const v = Math.round(n * 10) / 10; return `${v} lesson${v === 1 ? '' : 's'} a week`; };
+
+  function personStats(pid) {
+    const t = today();
+    const sums = enrollmentsOf(pid).map(e => courseSummary(pid, e.courseId)).filter(Boolean);
+    const total = sums.reduce((n, s) => n + s.total, 0);
+    const counts = Object.fromEntries(LESSON_STATUS.map(st => [st, sums.reduce((n, s) => n + (s.counts[st] || 0), 0)]));
+    const finished = [], stuck = [];
+    for (const s of sums) for (const l of lessonsOf(s.course)) {
+      const pr = progressOf(pid, l.id);
+      if (FINISHED.has(pr.status)) finished.push({ l, c: s.course, day: dayOf(lessonDates(pr).doneAt || pr.date) });
+      else if (pr.status === 'stuck') stuck.push({ l, c: s.course, since: pr.date || '' });
+    }
+    const days = markList().filter(m => m.pid === pid).map(m => dayOf(m.when)).filter(isDay).sort();
+    const first = days[0] || '', last = days[days.length - 1] || '';
+    const recent = finished.filter(f => isDay(f.day) && daysBetween(f.day, t) >= 0 && daysBetween(f.day, t) < 28).length;
+    const since = [first, ...enrollmentsOf(pid).map(e => e.startedOn)].filter(isDay).sort()[0] || '';
+    const span = since ? Math.max(7, daysBetween(since, t) + 1) : 0;
+    const recentPace = recent / 4, overallPace = span ? finished.length * 7 / span : 0, left = total - finished.length;
+    const eta = !total ? '' : left <= 0 ? 'complete' : recentPace > 0 ? addDays(t, Math.ceil(left / recentPace * 7)) : 'no pace yet';
+    return { sums, total, counts, done: finished.length, pct: total ? Math.round(100 * finished.length / total) : 0, gates: counts['gate-passed'],
+      finished, stuck, first, last, sinceLast: last ? daysBetween(last, t) : null, recent, recentPace, overallPace, eta };
+  }
+
+  const shortDay = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const r1 = v => Math.round(v * 10) / 10;
+  function chartWidth() {
+    const v = $('#view'); if (!v || !v.clientWidth) return 640;
+    const cs = getComputedStyle(v);
+    return Math.max(260, Math.min(1000, Math.floor(v.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 34)));
+  }
+  function marker(shape, cx, cy, color) {
+    const st = `style="fill:${color};stroke:var(--surface);stroke-width:2"`;
+    if (shape === 'square') return `<rect x="${r1(cx - 4.5)}" y="${r1(cy - 4.5)}" width="9" height="9" rx="1.5" ${st}/>`;
+    if (shape === 'triangle') return `<path d="M${r1(cx)} ${r1(cy - 5.5)}L${r1(cx + 5.5)} ${r1(cy + 4.5)}H${r1(cx - 5.5)}Z" ${st}/>`;
+    if (shape === 'diamond') return `<path d="M${r1(cx)} ${r1(cy - 6)}L${r1(cx + 6)} ${r1(cy)}L${r1(cx)} ${r1(cy + 6)}L${r1(cx - 6)} ${r1(cy)}Z" ${st}/>`;
+    return `<circle cx="${r1(cx)}" cy="${r1(cy)}" r="5" ${st}/>`;
+  }
+  const lineKey = k => `<svg class="key" width="30" height="14" viewBox="0 0 30 14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" style="stroke:${k.color};stroke-width:2;stroke-linecap:round${k.dash ? `;stroke-dasharray:${k.dash}` : ''}"/>${marker(k.shape, 15, 7, k.color)}</svg>`;
+
+  // Cumulative lessons finished, one step line per person, x = days.
+  function cumulativeChart(series) {
+    const all = series.flatMap(s => s.days);
+    if (!all.length) { S.chart = null; return '<div class="empty">No lessons finished yet.</div>'; }
+    const t = today(), last = all.reduce((a, b) => (a > b ? a : b)), end = last > t ? last : t;
+    let start = addDays(all.reduce((a, b) => (a < b ? a : b)), -1);
+    if (daysBetween(start, end) < 7) start = addDays(end, -7);
+    const span = daysBetween(start, end), W = chartWidth(), H = 250, ends = W >= 520;
+    const m = { l: 34, r: ends ? 104 : 16, t: 14, b: 30 }, pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const most = Math.max(1, ...series.map(s => s.days.length));
+    const step = most <= 6 ? 1 : most <= 12 ? 2 : most <= 30 ? 5 : 10, top = Math.ceil(most / step) * step;
+    const x = d => m.l + pw * daysBetween(start, d) / span, y = n => m.t + ph - ph * n / top;
+    let grid = '';
+    for (let n = 0; n <= top; n += step) grid += `<line class="grid-line" x1="${m.l}" x2="${m.l + pw}" y1="${r1(y(n))}" y2="${r1(y(n))}"/><text x="${m.l - 7}" y="${r1(y(n) + 4)}" text-anchor="end">${n}</text>`;
+    const every = Math.ceil(span / Math.max(1, Math.min(6, Math.floor(pw / 90))));
+    for (let k = 0; k <= span; k += every) {
+      const d = addDays(start, k), px = x(d);
+      grid += `<line class="axis" x1="${r1(px)}" x2="${r1(px)}" y1="${m.t + ph}" y2="${m.t + ph + 4}"/><text x="${r1(px)}" y="${H - 8}" text-anchor="${px < m.l + 20 ? 'start' : px > m.l + pw - 20 ? 'end' : 'middle'}">${esc(shortDay(d))}</text>`;
+    }
+    const drawn = series.map(s => {
+      const byDay = new Map(); for (const d of s.days) byDay.set(d, (byDay.get(d) || 0) + 1);
+      let n = 0, path = `M${m.l} ${r1(y(0))}`; const pts = [];
+      for (const [d, k] of byDay) { n += k; path += `H${r1(x(d))}V${r1(y(n))}`; pts.push([x(d), y(n)]); }
+      return { s, n, pts, path: path + `H${r1(x(end))}` };
+    });
+    const lines = drawn.map(({ s, n, pts, path }) => `<g><title>${esc(s.name)}: ${n} finished</title><path d="${path}" style="fill:none;stroke:${s.color};stroke-width:2;stroke-linejoin:round;stroke-linecap:round${s.dash ? `;stroke-dasharray:${s.dash}` : ''}"/>${pts.map(([px, py]) => marker(s.shape, px, py, s.color)).join('')}</g>`).join('');
+    let labels = '';
+    if (ends) {
+      // Labels that would collide are left to the legend, all of them, so none reads as the only one.
+      const ys = drawn.map(d => y(d.n) + 4);
+      drawn.forEach((d, i) => {
+        if (ys.some((v, j) => j !== i && Math.abs(v - ys[i]) < 13)) return;
+        labels += `<text class="end" x="${m.l + pw + 8}" y="${r1(ys[i])}">${esc(trunc(d.s.name, 13))} ${d.n}</text>`;
+      });
+    }
+    S.chart = { start, span, W, m, pw, series: series.map(s => ({ name: s.name, color: s.color, dash: s.dash, days: s.days })) };
+    return `<div class="chart-box" data-chart><svg viewBox="0 0 ${W} ${H}" role="img" tabindex="0" style="max-width:${W}px" aria-label="Lessons finished per person, cumulative, ${esc(start)} to ${esc(end)}. Left and right arrow keys read one day.">
+      ${grid}<line class="axis" x1="${m.l}" x2="${m.l + pw}" y1="${r1(y(0))}" y2="${r1(y(0))}"/>${lines}${labels}
+      <line class="cross" x1="0" x2="0" y1="${m.t}" y2="${m.t + ph}" visibility="hidden"/></svg><div class="chart-tip" hidden></div></div>`;
+  }
+  function bindChart(v) {
+    const box = $('[data-chart]', v), ch = S.chart;
+    if (!box || !ch) return;
+    const svg = $('svg', box), tip = $('.chart-tip', box), cross = $('.cross', svg);
+    let cur = null;
+    const show = di => {
+      cur = Math.max(0, Math.min(ch.span, di));
+      const day = addDays(ch.start, cur), px = ch.m.l + ch.pw * cur / ch.span;
+      cross.setAttribute('x1', r1(px)); cross.setAttribute('x2', r1(px)); cross.setAttribute('visibility', 'visible');
+      const head = document.createElement('div'); head.className = 'muted'; head.textContent = day;
+      tip.replaceChildren(head);
+      ch.series.map(s => ({ s, n: s.days.filter(d => d <= day).length })).sort((a, b) => b.n - a.n).forEach(({ s, n }) => {
+        const row = document.createElement('div'), key = document.createElement('span'), val = document.createElement('b');
+        key.className = 'k'; key.style.borderTop = `2px ${s.dash ? 'dashed' : 'solid'} ${s.color}`;
+        val.textContent = String(n);
+        row.append(key, val, document.createTextNode(s.name));
+        tip.append(row);
+      });
+      tip.hidden = false;
+      const scale = svg.getBoundingClientRect().width / ch.W, left = px * scale, tw = tip.offsetWidth;
+      tip.style.left = `${left + 12 + tw > box.clientWidth ? Math.max(0, left - 12 - tw) : left + 12}px`;
+      tip.style.top = `${Math.round(ch.m.t * scale)}px`;
+    };
+    const hide = () => { cross.setAttribute('visibility', 'hidden'); tip.hidden = true; cur = null; };
+    const dayAt = e => { const r = svg.getBoundingClientRect(); return Math.round(((e.clientX - r.left) * ch.W / r.width - ch.m.l) / ch.pw * ch.span); };
+    svg.addEventListener('pointermove', e => show(dayAt(e)));
+    svg.addEventListener('pointerdown', e => show(dayAt(e)));
+    svg.addEventListener('pointerleave', hide);
+    svg.addEventListener('focus', () => show(ch.span));
+    svg.addEventListener('blur', hide);
+    svg.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); show((cur ?? ch.span) + (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 7 : 1)); }
+      else if (e.key === 'Escape') hide();
+    });
+  }
+
+  function finishCell(pr) {
+    const d = lessonDates(pr);
+    if (FINISHED.has(pr.status)) {
+      const day = dayOf(d.doneAt || pr.date), gate = pr.status === 'gate-passed';
+      const tip = `finished ${day}${gate && d.gatePassedAt ? ', gate passed ' + dayOf(d.gatePassedAt) : ''}`;
+      return `<td class="day" title="${esc(tip)}">${esc(day || '?')}${gate ? ' ★' : ''}</td>`;
+    }
+    if (pr.status === 'in-progress') return `<td class="day muted" title="in progress since ${esc(dayOf(d.startedAt || pr.date))}">…</td>`;
+    if (pr.status === 'stuck') return `<td class="day" title="stuck since ${esc(pr.date || '')}">${pill('stuck', '! stuck')}</td>`;
+    return '<td class="day"></td>';
+  }
+
+  function vStats() {
+    const t = today(), idx = lessonIndex();
+    const rows = statPeople().map((p, i) => ({ p, s: personStats(p.id), look: SERIES[i % SERIES.length] }));
+    const sum = f => rows.reduce((n, r) => n + f(r), 0);
+    const open = sum(r => openAsks(r.p.id).length), stuck = sum(r => r.s.stuck.length);
+    const card = ({ p, s, look }) => {
+      const nq = openAsks(p.id).length, nm = threadOf(p.id).length, prs = personProjects(p.id);
+      const eta = !s.total ? '<span class="muted">not enrolled</span>' : s.eta === 'complete' ? pill('green', 'complete')
+        : s.eta === 'no pace yet' ? '<span class="muted">no pace yet</span>' : `${esc(s.eta)} <span class="muted">(in ${daysBetween(t, s.eta)} days)</span>`;
+      const kv = [
+        ['Courses', s.sums.map(cs => `${esc(cs.course.name)} <span class="muted">${cs.pct}% · ${cs.complete}/${cs.total}</span>`).join('<br>') || '<span class="muted">not enrolled</span>'],
+        ['Current lesson', s.sums.map(cs => cs.current ? esc(cs.current.title) + (s.sums.length > 1 ? ` <span class="muted">(${esc(cs.course.name)})</span>` : '') : `<span class="muted">${esc(cs.course.name)}: complete</span>`).join('<br>') || '<span class="muted">—</span>'],
+        ['Stuck', s.stuck.length ? s.stuck.map(x => `${pill('stuck', '!')} ${esc(x.l.title)}${x.since ? ` <span class="muted">since ${esc(x.since)}</span>` : ''}`).join('<br>') : '<span class="muted">none</span>'],
+        ['First mark', s.first ? esc(s.first) : '<span class="muted">none yet</span>'],
+        ['Last mark', s.last ? esc(s.last) : '<span class="muted">none yet</span>'],
+        ['Days since last mark', s.last ? esc(String(s.sinceLast)) : '<span class="muted">—</span>'],
+        ['Pace, last 28 days', `${fmtPace(s.recentPace)} <span class="muted">(${s.recent} finished)</span>`],
+        ['Pace overall', s.first ? fmtPace(s.overallPace) : '<span class="muted">—</span>'],
+        ['Projected finish', eta],
+        ['Questions', `${nq ? pill('yellow', nq + ' open') : '<span class="muted">0 open</span>'} <span class="muted">· ${nm} message${nm === 1 ? '' : 's'}</span>`],
+        ['Projects', prs.map(pr => `${prlink(pr.id)} <span class="muted small">(${esc(personRoleIn(pr, p.id))})</span>`).join('<br>') || '<span class="muted">none</span>'],
+      ];
+      return `<div class="card" data-stat-person="${esc(p.id)}"><h3>${lineKey(look)} ${plink(p.id)} ${p.track ? pill('purple', p.track) : ''}</h3>
+        <div class="small"><b>${s.pct}%</b> complete · ${s.done}/${s.total} lessons · ${s.gates} gate${s.gates === 1 ? '' : 's'} passed</div>
+        <div style="margin:6px 0 10px">${progressBar({ total: s.total, counts: s.counts })}</div>
+        <dl class="kv stat-kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl></div>`;
+    };
+    const chart = cumulativeChart(rows.map(({ p, s, look }) => ({ name: p.name, days: s.finished.map(f => f.day).filter(isDay).sort(), ...look })));
+    const legend = rows.length ? `<div class="chart-legend">${rows.map(({ p, s, look }) => `<span>${lineKey(look)}${esc(p.name)} <b>${s.done}</b></span>`).join('')}</div>` : '';
+    const feed = markList().sort((a, b) => sortKey(b.at).localeCompare(sortKey(a.at))).slice(0, 25);
+    const feedRow = m => {
+      const x = idx.get(m.lid), time = isDay(m.at) ? '' : whenLocal(m.at).slice(11);
+      return `<div class="row"><div class="when">${esc(dayOf(m.at))}${time ? `<br><span class="muted">${esc(time)}</span>` : ''}</div>
+        <div class="body"><div>${plink(m.pid)} <span class="muted">·</span> ${esc(x ? x.l.title : m.lid)}</div>
+        <div class="tags">${pill(m.status, label(m.status))}<span class="muted small">${esc(x ? x.c.name : '')}${m.when !== m.at ? ` · for ${esc(dayOf(m.when))}` : ''} · ${esc(ago(dayOf(m.at)))}</span></div></div></div>`;
+    };
+    const tables = courses().map(c => {
+      const who = rows.filter(r => enrollmentsOf(r.p.id).some(e => e.courseId === c.id));
+      if (!who.length) return '';
+      const body = (c.phases || []).map(ph => `<tr class="phase"><td colspan="${who.length + 1}">${esc(ph.name)}</td></tr>` +
+        (ph.lessons || []).map(l => `<tr><td class="lesson">${esc(l.title)}</td>${who.map(r => finishCell(progressOf(r.p.id, l.id))).join('')}</tr>`).join('')).join('');
+      return `<div class="card" style="margin-bottom:14px"><h3>${esc(c.name)}</h3><div class="tbl-wrap"><table class="tbl small stat-matrix"><thead><tr><th>Lesson</th>${who.map(r => `<th>${esc(r.p.name)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+    }).join('');
+    return `<div class="page-head"><div><h1>Team stats</h1><div class="sub">${rows.length} ${rows.length === 1 ? 'person' : 'people'} learning · computed from lesson marks and messages · only the lead sees this page</div></div></div>
+      <div class="kpis">
+        <div class="kpi"><div class="v">${sum(r => r.s.done)}</div><div class="l">lessons finished</div></div>
+        <div class="kpi"><div class="v">${sum(r => r.s.recent)}</div><div class="l">finished in the last 28 days</div></div>
+        <div class="kpi ${stuck ? 'bad' : 'good'}"><div class="v">${stuck}</div><div class="l">stuck lessons</div></div>
+        <div class="kpi ${open ? 'warn' : 'good'}"><div class="v">${open}</div><div class="l">open questions</div></div>
+      </div>
+      <div class="section" data-section="people"><div class="section-head"><h2>People</h2><span class="hint">pace = lessons finished per week; the finish date assumes the last 28 days' pace</span></div>
+        <div class="grid auto">${rows.map(card).join('') || '<div class="empty">No mentees yet.</div>'}</div></div>
+      <div class="section" data-section="chart"><div class="section-head"><h2>Lessons finished over time</h2><span class="hint">cumulative; a lesson counts from the day it was first finished</span></div>
+        <div class="card">${chart}${legend}</div></div>
+      <div class="section" data-section="feed"><div class="section-head"><h2>Recent marks</h2><span class="hint">latest ${feed.length} across the team</span></div>
+        <div class="card">${feed.map(feedRow).join('') || '<div class="empty">No marks yet.</div>'}</div></div>
+      <div class="section" data-section="lessons"><div class="section-head"><h2>Finished lessons by person</h2><span class="hint">the day each lesson was finished · ★ gate passed · … in progress</span></div>
+        ${tables || '<div class="empty">Nobody is enrolled in a course.</div>'}</div>`;
   }
 
   // ---------- status summary (plain text for a report or a chat message)
@@ -1189,10 +2040,11 @@
       lines.push('People', '');
       for (const m of mentees()) {
         const o = lastOneOnOne(m.id);
-        const lr = enrollmentsOf(m.id).map(e => courseSummary(m.id, e.courseId)).filter(Boolean).map(cs => `${cs.course.name}: ${cs.pct}%${cs.current ? ', now on ' + cs.current.title : ''}`).join('; ');
+        const lr = (canSeeLearningOf(m.id) ? enrollmentsOf(m.id) : []).map(e => courseSummary(m.id, e.courseId)).filter(Boolean).map(cs => `${cs.course.name}: ${cs.pct}%${cs.current ? ', now on ' + cs.current.title : ''}`).join('; ');
         lines.push(`${m.name}${m.focus ? ' — ' + m.focus : ''}`);
         lines.push(`  projects: ${personProjects(m.id).map(pr => pr.name + ' (' + personRoleIn(pr, m.id) + ')').join(', ') || '—'}`);
-        lines.push(canSeeHistory() ? `  last 1:1: ${o ? o.date : 'never'}${lr ? '; learning: ' + lr : ''}` : `  learning: ${lr || '—'}`);
+        if (canSeeHistory()) lines.push(`  last 1:1: ${o ? o.date : 'never'}${lr ? '; learning: ' + lr : ''}`);
+        else if (canSeeLearningOf(m.id)) lines.push(`  learning: ${lr || '—'}`);
         lines.push('');
       }
     }
@@ -1217,12 +2069,30 @@
   }
 
   // ---------- nav + router
-  const NAV = [['dashboard', 'Dashboard', '⌂'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['activity', 'Activity', '≡'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
+  const NAV = [['dashboard', 'Dashboard', '⌂', 'Home'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['stats', 'Team stats', '∑', 'Stats'], ['activity', 'Activity', '≡'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
+  const LEAD_ONLY = new Set(['activity', 'stats']);
+  const navHref = k => k === 'dashboard' ? '#/' : k === 'learning' && !canSeeHistory() && signedInAs() ? `#/people/${signedInAs()}/learning` : `#/${k}`;
+  function navKey() {
+    const r = S.route;
+    if (LEAD_ONLY.has(r.name) && !canSeeHistory()) return 'dashboard';
+    if (!canSeeHistory() && r.name === 'people' && r.tab === 'learning' && r.id === signedInAs()) return 'learning';
+    return r.name;
+  }
   function renderNav() {
     $('#nav').innerHTML = `<div class="brand">Team Tracker<small>${esc(settings().teamName || '')}</small></div>` +
-      NAV.filter(([k]) => k !== 'activity' || canSeeHistory()).map(([k, l, i]) => `<a class="item ${S.route.name === k ? 'active' : ''}" href="#/${k === 'dashboard' ? '' : k}"><span class="ico">${i}</span>${l}${k === 'ci' && allLive().length ? ' <span class="live-dot"></span>' : ''}</a>`).join('') +
+      NAV.filter(([k]) => !LEAD_ONLY.has(k) || canSeeHistory()).map(([k, l, i, short]) => `<a class="item ${navKey() === k ? 'active' : ''}" href="${esc(navHref(k))}" aria-label="${esc(l)}"><span class="ico" aria-hidden="true">${i}</span><span class="lbl" aria-hidden="true">${l}</span><span class="lbl-m" aria-hidden="true">${short || l}</span>${k === 'ci' && allLive().length ? ' <span class="live-dot"></span>' : ''}</a>`).join('') +
       `<div class="spacer"></div><div class="status"><a href="#" data-act="who" title="who is at this browser">You: ${esc(viewerName())}</a></div>` +
       `<div class="status"><span class="dot ${S.backend === 'static' ? '' : 'on'}"></span>${S.backend === 'server' ? 'saving to data/' : S.backend === 'github' ? `GitHub · ${esc(ghConfig().owner)}/${esc(ghConfig().repo)}` : 'browser-only mode'}</div>`;
+  }
+  function renderFab() {
+    let fab = $('#fab');
+    if (!canSeeHistory()) { if (fab) fab.remove(); return; }
+    if (fab) return;
+    fab = document.createElement('button');
+    Object.assign(fab, { type: 'button', id: 'fab', className: 'fab', title: 'Log activity', textContent: '+' });
+    fab.setAttribute('aria-label', 'Log activity');
+    fab.addEventListener('click', () => editActivity(null, {}));
+    document.body.insertBefore(fab, $('#toast'));
   }
   function parseRoute() {
     const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -1232,21 +2102,24 @@
   }
   let prevRoute = '';
   function render() {
-    parseRoute(); renderNav();
+    parseRoute(); syncWaits(); renderNav(); renderFab();
     const v = $('#view'); const r = S.route;
     const key = `${r.name}/${r.id || ''}/${r.tab || ''}`; const sameView = key === prevRoute; prevRoute = key;
     const y = window.scrollY; const mw = $('.matrix-wrap', v); const mx = mw ? [mw.scrollLeft, mw.scrollTop] : null;
     const openPhases = new Set($$('details[data-phase][open]', v).map(d => d.dataset.phase));
+    const ae = document.activeElement, caret = ae && ae.dataset && ae.dataset.cf === 'q' ? [ae.selectionStart, ae.selectionEnd] : null;
     const views = {
       dashboard: () => vDashboard(), projects: () => r.id ? vProject(r.id) : vProjects(), people: () => r.id ? vPerson(r.id) : vPeople(),
-      learning: () => vLearning(r.id), activity: () => canSeeHistory() ? vActivity() : vDashboard(), ci: () => vCI(), data: () => vData(),
+      learning: () => vLearning(r.id), activity: () => canSeeHistory() ? vActivity() : vDashboard(), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
     };
     const notice = S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
     bind(v);
     if (r.name === 'ci' || (r.name === 'projects' && r.tab === 'ci')) startCiAuto(); else stopCiAuto();
+    if (r.name === 'projects' && r.id) wantCatalog(r.id);
     if (sameView) {
       openPhases.forEach(k => { const d = $$('details[data-phase]', v).find(x => x.dataset.phase === k); if (d) d.open = true; });
+      const q = caret && $('[data-cf="q"]', v); if (q) { q.focus(); q.setSelectionRange(caret[0], caret[1]); }
       window.scrollTo(0, y);
       const nm = $('.matrix-wrap', v); if (nm && mx) { nm.scrollLeft = mx[0]; nm.scrollTop = mx[1]; }
     } else window.scrollTo(0, 0);
@@ -1256,7 +2129,8 @@
     $$('[data-href]', v).forEach(el => el.addEventListener('click', e => { if (e.target.closest('a,button:not([data-href])')) return; location.hash = el.dataset.href; }));
     $$('[data-filter]', v).forEach(el => el.addEventListener('change', () => { S.filter = { ...(S.filter || {}), [el.dataset.filter]: el.value }; render(); }));
     $$('[data-af]', v).forEach(el => el.addEventListener(el.type === 'search' ? 'input' : 'change', () => { S.actFilter = { ...(S.actFilter || { person: '', project: '', type: '', range: '30', q: '' }), [el.dataset.af]: el.value }; if (el.type === 'search') { const pos = el.selectionStart; render(); const n = $('[data-af="q"]'); n.focus(); n.setSelectionRange(pos, pos); } else render(); }));
-    $$('.lesson-status', v).forEach(el => el.addEventListener('change', async () => { await setLesson(el.dataset.person, el.dataset.lesson, el.value, progressOf(el.dataset.person, el.dataset.lesson).note); render(); }));
+    $$('.lesson-status', v).forEach(el => el.addEventListener('change', async () => { await setLesson(el.dataset.person, el.dataset.lesson, el.value); render(); }));
+    $$('[data-cf]', v).forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => { catFilterOf(el.dataset.project)[el.dataset.cf] = el.value; paintCatalog(el.dataset.project); }));
     $$('td.cell', v).forEach(td => {
       const d = td.dataset; let pressTimer = null; let longPressed = false;
       td.addEventListener('click', e => {
@@ -1269,6 +2143,7 @@
     });
     $$('[data-theme-set]', v).forEach(b => b.addEventListener('click', () => { const t = b.dataset.themeSet; localStorage.setItem(LS + 'theme', t); applyTheme(); render(); }));
     const imp = $('input[data-act="import"]', v); if (imp) imp.addEventListener('change', importFile);
+    bindChart(v);
   }
 
   document.addEventListener('click', async e => {
@@ -1292,10 +2167,12 @@
       case 'del-person': return deletePerson(d.id);
       case 'enroll': return enroll(d.person);
       case 'enroll-any': {
-        const v = await form('Enroll someone', [{ key: 'personId', label: 'Person', type: 'select', options: peopleOpts() }]);
+        const who = peopleOpts().filter(o => canSeeLearningOf(o.value));
+        if (!who.length) { toast(learningLock(), 5000); return; }
+        const v = await form('Enroll someone', [{ key: 'personId', label: 'Person', type: 'select', options: who }]);
         if (v && v.personId) return enroll(v.personId, { courseId: d.course }); return;
       }
-      case 'edit-enroll': { const e = learning().enrollments.find(x => x.personId === d.person && x.courseId === d.course); return enroll(d.person, e || { courseId: d.course }); }
+      case 'edit-enroll': { if (!canSeeLearningOf(d.person)) return; const e = learning().enrollments.find(x => x.personId === d.person && x.courseId === d.course); return enroll(d.person, e || { courseId: d.course }); }
       case 'unenroll': return unenroll(d.person, d.course);
       case 'edit-lesson': return editLesson(d.person, d.lesson, d.title);
       case 'settings': return editSettings();
@@ -1306,6 +2183,9 @@
       case 'del-msg': return deleteMessage(d.id);
       case 'who': return chooseViewer();
       case 'run-ci': return runCI(d.project, d.group);
+      case 'report': return openReportFor(d.project, d.run || '', d.idx);
+      case 'wait-dismiss': return dismissWait(d.id);
+      case 'cat-clear': { S.catFilter[d.project] = { q: '', kind: '', area: '' }; render(); const q = $('[data-cf="q"]'); if (q) q.focus(); return; }
       case 'refresh-ci': return refreshCI(b);
       case 'gh-connect': return connectGitHub();
       case 'gh-disconnect': return disconnectGitHub();
@@ -1313,10 +2193,9 @@
       case 'clear-local': { if (confirm('Discard all browser-only edits and reload the data files?')) { COLLECTIONS.forEach(c => localStorage.removeItem(LS + c)); location.reload(); } return; }
     }
   });
-  $('#fab').addEventListener('click', () => editActivity(null, {}));
 
   function exportAll() {
-    const blob = new Blob([JSON.stringify(Object.fromEntries(COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => [c, S.data[c]])), null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(Object.fromEntries(COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => [c, c === 'learning' ? visibleLearning() : S.data[c]])), null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `team-tracker-${today()}.json`; a.click(); URL.revokeObjectURL(a.href);
   }
   async function importFile(e) {
@@ -1324,7 +2203,7 @@
     let obj;
     try { obj = JSON.parse(await f.text()); } catch { return toast('Could not read that file'); }
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return toast('Not a tracker export');
-    const keys = COLLECTIONS.filter(c => c in obj && (Array.isArray(DEFAULTS[c]()) ? Array.isArray(obj[c]) : obj[c] && typeof obj[c] === 'object' && !Array.isArray(obj[c])));
+    const keys = COLLECTIONS.filter(c => c in obj && (c !== 'learning' || canSeeHistory()) && (Array.isArray(DEFAULTS[c]()) ? Array.isArray(obj[c]) : obj[c] && typeof obj[c] === 'object' && !Array.isArray(obj[c])));
     if (!keys.length) return toast('No valid collections in that file');
     if (!confirm(`Replace ${keys.join(', ')} with the file contents?`)) return;
     for (const c of keys) { S.data[c] = normalize(c, obj[c]); await save(c); }
@@ -1337,6 +2216,11 @@
   }
 
   window.addEventListener('hashchange', render);
+  let lastWidth = window.innerWidth, resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (window.innerWidth === lastWidth) return; lastWidth = window.innerWidth; if (S.route.name === 'stats') render(); }, 250);
+  });
   applyTheme();
   load().then(() => { render(); autoRefreshIfStale(); });
 })();
