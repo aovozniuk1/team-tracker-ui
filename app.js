@@ -357,7 +357,9 @@
   // The lead edits every project. A project's own lead edits what is written and planned in it;
   // what the project is and who is on it stay the lead's.
   const OWNER_FIELDS = new Set(['summary', 'status', 'health', 'healthReason', 'nextMilestone', 'workstreams', 'keyFacts', 'risks', 'openQuestions', 'nextSteps', 'notes', 'stack', 'systems']);
-  const canEditProject = p => !!p && (canSeeHistory() || (!!signedInAs() && p.leadId === signedInAs()));
+  // A project's overview (what it is, its facts, risks, plans and workstreams) is the lead's alone.
+  const canSeeOverview = () => canSeeHistory();
+  const canEditProject = p => !!p && canSeeOverview();
   function mayChange(p, path) {
     if (canSeeHistory()) return true;
     if (!canEditProject(p)) return false;
@@ -1009,7 +1011,7 @@
   function attention() {
     const out = [], st = settings(), t = today();
     for (const p of projects()) {
-      if (p.status !== 'active') continue;
+      if (p.status !== 'active' || !canSeeOverview()) continue;
       if (p.health === 'red') out.push({ lvl: 'red', text: `${p.name}: health red — ${p.healthReason || 'no reason recorded'}`, href: `#/projects/${p.id}` });
       else if (p.health === 'yellow') out.push({ lvl: 'yellow', text: `${p.name}: health yellow — ${p.healthReason || 'no reason recorded'}`, href: `#/projects/${p.id}` });
       const due = p.nextMilestone?.due;
@@ -1148,14 +1150,13 @@
       { key: 'milestoneDue', label: 'Milestone due', type: 'date', own: true },
       { key: 'stackText', label: 'Stack', help: 'comma-separated', own: true },
       { key: 'aliasesText', label: 'Aliases', help: 'comma-separated, other names people use' },
-      { key: 'repos', label: 'Repositories', type: 'records', cols: ['name', 'url', 'branch', 'localPath'], help: 'one per line: name | url | branch | local path' },
+      { key: 'repos', label: 'Repositories', type: 'records', cols: ['name', 'url', 'branch'], help: 'one per line: name | url | branch' },
       { key: 'environments', label: 'Environments', type: 'records', cols: ['name', 'url'], help: 'one per line: name | url' },
       ...envs.flatMap((e, i) => [
         { key: `envStatus${i}`, label: `${e.name} — status`, type: 'select', options: opt([...new Set([...ENV_STATUS, ...(e.status ? [e.status] : [])])]), allowEmpty: true, emptyLabel: 'not set', own: true },
         { key: `envNotes${i}`, label: `${e.name} — notes`, type: 'textarea', own: true },
       ]),
       { key: 'systems', label: 'Systems involved', type: 'records', cols: ['name', 'url', 'role'], help: 'one per line: name | url | role', own: true },
-      { key: 'localDocs', label: 'Local docs', type: 'records', cols: ['path', 'what'], help: 'one per line: path | what it is' },
       { key: 'keyFacts', label: 'Key facts', type: 'lines', rows: 5, help: 'one per line', own: true },
       { key: 'risks', label: 'Risks', type: 'lines', help: 'one per line', own: true },
       { key: 'openQuestions', label: 'Open questions', type: 'lines', help: 'one per line', own: true },
@@ -1182,7 +1183,6 @@
         name: v.name, code: v.code, client: v.client, leadId: v.leadId || '', memberIds: v.memberIds, startedOn: v.startedOn,
         aliases: v.aliasesText.split(',').map(s => s.trim()).filter(Boolean),
         repos: keepUnshown(v.repos, p.repos, ['name']),
-        localDocs: keepUnshown(v.localDocs, p.localDocs, ['path']),
       } : {}),
       updatedOn: today(),
     };
@@ -1742,13 +1742,14 @@
   function projectCard(p) {
     const la = projectActs(p.id)[0];
     const bl = openBlockers().filter(b => b.projectId === p.id).length;
-    const ms = p.nextMilestone?.text ? `<div class="small"><span class="muted">Next:</span> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` <span class="${p.nextMilestone.due < today() ? 'pill red' : 'muted'}">${esc(p.nextMilestone.due)}</span>` : ''}</div>` : '';
-    const wsA = (p.workstreams || []).filter(w => w.status === 'active').length;
+    const seeO = canSeeOverview();
+    const ms = seeO && p.nextMilestone?.text ? `<div class="small"><span class="muted">Next:</span> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` <span class="${p.nextMilestone.due < today() ? 'pill red' : 'muted'}">${esc(p.nextMilestone.due)}</span>` : ''}</div>` : '';
+    const wsA = seeO ? (p.workstreams || []).filter(w => w.status === 'active').length : 0;
     const s = ciSource(p.id), r = s ? headlineRun(s) : null;
     const ciLine = s ? `<div class="small" style="margin-top:6px">${s.tests ? `<b>${esc(String(s.tests.functions))}</b> tests` : '<span class="muted">tests not counted</span>'}${r ? ` · ${resultPill(r)} <span class="muted">${esc(r.name || '')}, ${esc(agoIso(r.startedAt))}</span>` : ' · <span class="muted">no CI runs</span>'}</div>` : '';
     return `<div class="card clickable" data-href="#/projects/${esc(p.id)}"><h3>${dot(p.health)} <a href="#/projects/${esc(p.id)}">${esc(p.name)}</a> ${pill(p.status)}</h3>
       <div class="meta">Lead: ${p.leadId ? esc(pname(p.leadId)) : '<i>unassigned</i>'}${p.code ? ` · ${esc(p.code)}` : ''}${wsA ? ` · ${wsA} active workstream${wsA === 1 ? '' : 's'}` : ''}${bl ? ` · <span class="pill blocker">${bl} blocker${bl === 1 ? '' : 's'}</span>` : ''}</div>
-      <p class="small" style="margin-top:6px">${esc(trunc(p.summary, 140))}</p>${ms}${ciLine}
+      ${seeO ? `<p class="small" style="margin-top:6px">${esc(trunc(p.summary, 140))}</p>` : ''}${ms}${ciLine}
       ${canSeeHistory() ? `<div class="muted small">${la ? `${esc(trunc(la.text, 90))} — ${esc(ago(la.date))}` : 'no activity logged'}</div>` : ''}</div>`;
   }
 
@@ -1757,8 +1758,8 @@
     const list = projects().filter(p => !f || p.status === f);
     return `<div class="page-head"><div><h1>Projects</h1><div class="sub">${projects().length} total</div></div><div class="actions">${canSeeHistory() ? '<button class="btn primary" data-act="new-project">New project</button>' : ''}</div></div>
       <div class="filters"><select data-filter="status"><option value="">all statuses</option>${STATUS.map(s => `<option value="${s}"${f === s ? ' selected' : ''}>${label(s)}</option>`).join('')}</select></div>
-      <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Status</th><th>Health</th><th>Lead</th><th>Team</th><th>Next milestone</th>${canSeeHistory() ? '<th>Last activity</th>' : ''}</tr></thead><tbody>
-      ${list.map(p => { const la = projectActs(p.id)[0]; return `<tr><td>${prlink(p.id)}<div class="muted small">${esc(p.code || '')}${p.client ? ' · ' + esc(p.client) : ''}</div></td><td>${pill(p.status)}</td><td>${dot(p.health)} <span class="small">${esc(trunc(p.healthReason, 60))}</span></td><td>${p.leadId ? plink(p.leadId) : '<span class="muted">—</span>'}</td><td class="small">${(p.memberIds || []).map(pname).map(esc).join(', ') || '<span class="muted">—</span>'}</td><td class="small">${p.nextMilestone?.text ? esc(p.nextMilestone.text) + (p.nextMilestone.due ? ` <span class="${p.nextMilestone.due < today() ? 'pill red' : 'muted'}">${esc(p.nextMilestone.due)}</span>` : '') : '<span class="muted">—</span>'}</td>${canSeeHistory() ? `<td class="small">${la ? esc(ago(la.date)) : '<span class="muted">—</span>'}</td>` : ''}</tr>`; }).join('') || `<tr><td colspan="${canSeeHistory() ? 7 : 6}" class="empty">No projects match.</td></tr>`}
+      <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Status</th><th>Health</th><th>Lead</th><th>Team</th>${canSeeOverview() ? '<th>Next milestone</th>' : ''}${canSeeHistory() ? '<th>Last activity</th>' : ''}</tr></thead><tbody>
+      ${list.map(p => { const la = projectActs(p.id)[0]; return `<tr><td>${prlink(p.id)}<div class="muted small">${esc(p.code || '')}${canSeeOverview() && p.client ? ' · ' + esc(p.client) : ''}</div></td><td>${pill(p.status)}</td><td>${dot(p.health)}${canSeeOverview() ? ` <span class="small">${esc(trunc(p.healthReason, 60))}</span>` : ''}</td><td>${p.leadId ? plink(p.leadId) : '<span class="muted">—</span>'}</td><td class="small">${(p.memberIds || []).map(pname).map(esc).join(', ') || '<span class="muted">—</span>'}</td>${canSeeOverview() ? `<td class="small">${p.nextMilestone?.text ? esc(p.nextMilestone.text) + (p.nextMilestone.due ? ` <span class="${p.nextMilestone.due < today() ? 'pill red' : 'muted'}">${esc(p.nextMilestone.due)}</span>` : '') : '<span class="muted">—</span>'}</td>` : ''}${canSeeHistory() ? `<td class="small">${la ? esc(ago(la.date)) : '<span class="muted">—</span>'}</td>` : ''}</tr>`; }).join('') || `<tr><td colspan="${canSeeHistory() ? 7 : 5}" class="empty">No projects match.</td></tr>`}
       </tbody></table></div>`;
   }
 
@@ -1769,16 +1770,16 @@
       ['Client', esc(p.client)], ['Lead', p.leadId ? plink(p.leadId) : '<i class="muted">unassigned</i>'],
       ['Members', (p.memberIds || []).map(plink).join(', ')],
       ['Started', esc(p.startedOn)], ['Stack', (p.stack || []).map(esc).join(', ')], ['Aliases', (p.aliases || []).map(esc).join(', ')],
-      ['Repositories', (p.repos || []).map(r => `${link(r.url, r.name)}${r.branch ? ` <span class="muted small">(${esc(r.branch)})</span>` : ''}${r.localPath ? `<div class="mono muted small">${esc(r.localPath)}</div>` : ''}`).join('<br>')],
+      ['Repositories', (p.repos || []).map(r => `${link(r.url, r.name)}${r.branch ? ` <span class="muted small">(${esc(r.branch)})</span>` : ''}`).join('<br>')],
       ['Environments', (p.environments || []).map(e => { const k = `environments/${e.name}/`;
         return `${link(e.url, e.name)} ${envPill(e)}${e.notes ? ` <span class="muted small">— ${esc(e.notes)}</span>` : ''}${editedNote(p, k + 'notes', 'notes')}${editedNote(p, k + 'status', 'status')}${suggestBox(p, k + 'notes')}${suggestBox(p, k + 'status')}`; }).join('<br>')],
       ['Systems', (p.systems || []).map(s => `${link(s.url, s.name)}${s.role ? ` <span class="muted small">— ${esc(s.role)}</span>` : ''}`).join('<br>')],
-      ['Local docs', (p.localDocs || []).map(d => `<span class="mono small">${esc(d.path)}</span> <span class="muted small">— ${esc(d.what)}</span>`).join('<br>')],
       ['Updated', esc(p.updatedOn)],
     ].filter(([, v]) => v);
-    const src = ciSource(id), lr = src ? headlineRun(src) : null, tab = ['ci', 'tests'].includes(S.route.tab) ? S.route.tab : '';
+    const seeO = canSeeOverview();
+    const src = ciSource(id), lr = src ? headlineRun(src) : null, tab = ['ci', 'tests'].includes(S.route.tab) ? S.route.tab : seeO ? '' : 'ci';
     const nLive = src ? liveRuns(src).length : 0, cat = S.catalogs[id];
-    const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} was running</span>` : lr ? ' ' + resultPill(lr) : ''}</button>${cat ? `<button class="${tab === 'tests' ? 'active' : ''}" data-href="#/projects/${esc(id)}/tests">Tests${cat.error ? '' : ` <span class="pill">${cat.tests.length}</span>`}</button>` : ''}</div>`;
+    const tabs = `<div class="tabs">${seeO ? `<button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button>` : ''}<button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} was running</span>` : lr ? ' ' + resultPill(lr) : ''}</button>${cat ? `<button class="${tab === 'tests' ? 'active' : ''}" data-href="#/projects/${esc(id)}/tests">Tests${cat.error ? '' : ` <span class="pill">${cat.tests.length}</span>`}</button>` : ''}</div>`;
     const edit = canEditProject(p), pending = pendingOf(p), nSug = pending.length;
     const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}${nSug ? ' ' + pill('purple', `${nSug} suggested`) : ''}</h1></div>
       <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button>` : ''}${edit ? `<button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button>` : ''}${canSeeHistory() ? `<button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button>` : ''}</div></div>`;
@@ -2376,9 +2377,9 @@
     for (const p of projects().filter(x => x.status !== 'done')) {
       const la = projectActs(p.id)[0];
       const bl = openBlockers().filter(b => b.projectId === p.id);
-      lines.push(`${p.name} — ${p.status}, health ${p.health}${p.healthReason ? ': ' + p.healthReason : ''}`);
+      lines.push(`${p.name} — ${p.status}, health ${p.health}${canSeeOverview() && p.healthReason ? ': ' + p.healthReason : ''}`);
       lines.push(`  lead: ${p.leadId ? pname(p.leadId) : 'unassigned'}${(p.memberIds || []).length ? '; also ' + p.memberIds.map(pname).join(', ') : ''}`);
-      if (p.nextMilestone?.text) lines.push(`  next: ${p.nextMilestone.text}${p.nextMilestone.due ? ' (due ' + p.nextMilestone.due + ')' : ''}`);
+      if (canSeeOverview() && p.nextMilestone?.text) lines.push(`  next: ${p.nextMilestone.text}${p.nextMilestone.due ? ' (due ' + p.nextMilestone.due + ')' : ''}`);
       const src = ciSource(p.id);
       if (src) {
         lines.push(`  tests: ${src.tests ? src.tests.functions + ' functions' : 'not counted'}${src.status === 'error' ? '; collector error: ' + src.error : ''}`);
@@ -2559,7 +2560,9 @@
   const visiblePeople = () => canSeeHistory() ? people() : people().map(p => canSeeLearningOf(p.id) ? p : Object.fromEntries(Object.entries(p).filter(([k]) => !LEARNING_FIELDS.includes(k))));
   const visibleCurriculum = () => ({ ...S.data.curriculum, courses: courses() });
   // Pending suggestions, and the answers dismissed kept with the marks, go to whoever may settle them.
+  const PUBLIC_PROJECT = ['id', 'name', 'code', 'status', 'health', 'leadId', 'memberIds', 'startedOn'];
   const visibleProjects = () => projects().map(p => {
+    if (!canSeeOverview()) return Object.fromEntries(PUBLIC_PROJECT.filter(k => k in p).map(k => [k, p[k]]));
     if (canSeeHistory() || (!p.suggested && !p.edited)) return p;
     const { suggested, edited, ...rest } = p, keep = pendingOf(p);
     const s = Object.fromEntries(Object.entries(suggested || {}).filter(([k]) => keep.includes(k)));
