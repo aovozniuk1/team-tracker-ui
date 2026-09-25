@@ -207,14 +207,14 @@ ul.plain li { margin: 2px 0; }
 .progress .p-prog { background: var(--yellow); }
 .progress .p-stuck { background: var(--red); }
 
-.matrix-wrap { overflow: auto; max-height: 75vh; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.matrix-wrap { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 table.matrix { border-collapse: separate; border-spacing: 0; font-size: .8rem; min-width: 100%; }
 table.matrix th, table.matrix td { border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); padding: 0; }
-table.matrix thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; padding: 6px 4px; font-weight: 600; color: var(--muted); }
+table.matrix thead th { position: sticky; top: 0; background: var(--surface); z-index: 3; padding: 6px 4px; font-weight: 600; color: var(--muted); }
 table.matrix thead tr.phases th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; background: var(--surface-2); top: 0; height: 28px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 4px 8px; }
 table.matrix thead tr.lessons th { top: 28px; writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; white-space: nowrap; font-weight: 500; font-size: .74rem; padding: 6px 3px; }
-table.matrix th.person, table.matrix thead tr.lessons th.person { position: sticky; left: 0; z-index: 3; background: var(--surface); text-align: left; padding: 6px 10px; writing-mode: horizontal-tb; transform: none; height: auto; min-width: 150px; overflow: visible; }
-table.matrix thead th.person { z-index: 4; }
+table.matrix th.person, table.matrix thead tr.lessons th.person { position: sticky; left: 0; z-index: 2; background: var(--surface); text-align: left; padding: 6px 10px; writing-mode: horizontal-tb; transform: none; height: auto; min-width: 150px; overflow: visible; }
+table.matrix thead th.person, table.matrix thead tr.lessons th.person { z-index: 5; }
 table.matrix td.cell { width: 30px; height: 30px; text-align: center; cursor: pointer; user-select: none; }
 table.matrix td.cell:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
 table.matrix td.cell.not-started { background: transparent; }

@@ -806,7 +806,7 @@
     const bg = document.createElement('div'); bg.className = 'modal-bg report-bg';
     bg.innerHTML = `<div class="modal report-viewer" role="dialog" aria-modal="true" aria-label="${esc(name)}">
       <header><div class="rv-title"><h2>${esc(name)}</h2><div class="muted small">${esc([caption, size].filter(Boolean).join(' · '))}</div></div>
-        <div class="actions"><a class="btn sm" data-ext href="${esc(rep.url)}" target="_blank" rel="noopener">${where} ↗</a><button type="button" class="btn sm" data-x aria-label="Close the report">✕ Close</button></div></header>
+        <div class="actions"><button type="button" class="btn sm" data-dl>Download</button><a class="btn sm" data-ext href="${esc(rep.url)}" target="_blank" rel="noopener">${where} ↗</a><button type="button" class="btn sm" data-x aria-label="Close the report">✕ Close</button></div></header>
       <div class="rv-body"><div class="rv-state" role="status" aria-live="polite"></div></div></div>`;
     document.body.appendChild(bg); document.body.classList.add('viewing');
     const body = $('.rv-body', bg), state = $('.rv-state', bg);
@@ -832,6 +832,24 @@
     document.addEventListener('keydown', onKey);
     $('[data-x]', bg).addEventListener('click', close);
     bg.addEventListener('click', e => { if (e.target === bg) close(); });
+    // The saved file is the report itself: the page already holds it after fetching it from GitHub,
+    // and a public report site answers a plain fetch.
+    const fileName = () => {
+      let n = '';
+      try { n = inl.type === 'repo' ? inl.path.split('/').slice(-2).join('-') : decodeURIComponent(new URL(inl.src).pathname.split('/').pop()); } catch { /* fall back below */ }
+      return /\.html?$/i.test(n) ? n : `${name.replace(/[^\w.-]+/g, '-')}.html`;
+    };
+    const saveAs = href => { const a = document.createElement('a'); a.href = href; a.download = fileName(); document.body.appendChild(a); a.click(); a.remove(); };
+    $('[data-dl]', bg).addEventListener('click', async () => {
+      if (blobUrl) { saveAs(blobUrl); return; }
+      if (inl.type !== 'url') { toast('The report is still being fetched; download it once it shows.'); return; }
+      try {
+        const r = await fetch(inl.src, { cache: 'no-store' });
+        if (!r.ok) throw new Error(String(r.status));
+        const u = URL.createObjectURL(await r.blob());
+        saveAs(u); setTimeout(() => URL.revokeObjectURL(u), 60000);
+      } catch { toast(`The report could not be downloaded here; use “${where}” and save it from there.`); }
+    });
 
     const mount = (src, sandbox) => {
       frame = document.createElement('iframe');
@@ -1017,7 +1035,7 @@
     const age = ciAge();
     if (age && age.stale) out.push({ lvl: 'yellow', text: `CI snapshot is ${Math.round(age.hours)} hours old`, href: '#/ci' });
     for (const b of openBlockers()) {
-      out.push({ lvl: 'red', text: `Blocker${b.projectId ? ' on ' + (project(b.projectId)?.name || '') : ''}${b.personId ? ' (' + pname(b.personId) + ')' : ''}: ${trunc(b.text, 120)}`, href: b.projectId ? `#/projects/${b.projectId}` : '#/activity' });
+      out.push({ lvl: 'red', text: `Blocker${b.projectId ? ' on ' + (project(b.projectId)?.name || '') : ''}${b.personId ? ' (' + pname(b.personId) + ')' : ''}: ${trunc(b.text, 120)}`, href: b.projectId ? `#/projects/${b.projectId}` : b.personId ? `#/people/${b.personId}` : '#/' });
     }
     for (const p of activePeople().filter(x => canSeeThreadOf(x.id))) {
       const q = openAsks(p.id);
@@ -1694,7 +1712,6 @@
     const avg = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
     const reds = att.filter(a => a.lvl === 'red').length;
     const hist = canSeeHistory();
-    const recent = acts().slice().sort(byDateDesc).slice(0, 12);
     const attRow = a => `<div class="row"><div class="lvl ${a.lvl}"></div><div class="body"><a href="${esc(a.href)}">${esc(a.text)}</a></div></div>`;
     return `<div class="page-head"><div><h1>${esc(st.teamName || 'Team')}</h1><div class="sub">${esc(today())} · ${act.length} active project${act.length === 1 ? '' : 's'} · ${mentees().length} mentee${mentees().length === 1 ? '' : 's'}</div></div>
       <div class="actions"><button class="btn" data-act="summary">Status summary</button>${hist ? `<button class="btn" data-act="log-11">Log 1:1</button><button class="btn" data-act="log-blocker">Log blocker</button><button class="btn primary" data-act="log-act">Log activity</button>` : ''}</div></div>
@@ -1705,11 +1722,9 @@
         <div class="kpi ${overdue11.length ? 'warn' : 'good'}"><div class="v">${overdue11.length}</div><div class="l">1:1s due</div></div>` : ''}
         <div class="kpi"><div class="v">${avg == null ? '—' : avg + '%'}</div><div class="l">${canSeeHistory() ? 'avg learning progress' : 'your learning progress'}</div></div>
       </div>
-      <div class="grid ${hist ? 'cols-2' : ''}">
+      <div class="grid">
         <div class="section"><div class="section-head"><h2>Needs attention</h2><span class="hint">${att.length} item${att.length === 1 ? '' : 's'}</span></div>
           <div class="card attention">${att.length ? att.slice(0, 10).map(attRow).join('') + (att.length > 10 ? `<details class="more"><summary class="small">show ${att.length - 10} more</summary>${att.slice(10).map(attRow).join('')}</details>` : '') : '<div class="empty">All quiet. Nothing overdue, no blockers, no red health.</div>'}</div></div>
-        ${hist ? `<div class="section"><div class="section-head"><h2>Recent activity</h2><a href="#/activity" class="small">all →</a></div>
-          <div class="card">${recent.length ? recent.map(a => actRow(a)).join('') : '<div class="empty">Nothing logged yet. Use “Log activity”.</div>'}</div></div>` : ''}
       </div>
       <div class="section"><div class="section-head"><h2>Projects</h2><a href="#/projects" class="small">manage →</a></div>
         <div class="grid auto">${projects().filter(p => p.status !== 'done').map(projectCard).join('') || '<div class="empty">No projects yet.</div>'}</div></div>
@@ -1733,7 +1748,7 @@
     const ciLine = s ? `<div class="small" style="margin-top:6px">${s.tests ? `<b>${esc(String(s.tests.functions))}</b> tests` : '<span class="muted">tests not counted</span>'}${r ? ` · ${resultPill(r)} <span class="muted">${esc(r.name || '')}, ${esc(agoIso(r.startedAt))}</span>` : ' · <span class="muted">no CI runs</span>'}</div>` : '';
     return `<div class="card clickable" data-href="#/projects/${esc(p.id)}"><h3>${dot(p.health)} <a href="#/projects/${esc(p.id)}">${esc(p.name)}</a> ${pill(p.status)}</h3>
       <div class="meta">Lead: ${p.leadId ? esc(pname(p.leadId)) : '<i>unassigned</i>'}${p.code ? ` · ${esc(p.code)}` : ''}${wsA ? ` · ${wsA} active workstream${wsA === 1 ? '' : 's'}` : ''}${bl ? ` · <span class="pill blocker">${bl} blocker${bl === 1 ? '' : 's'}</span>` : ''}</div>
-      <p class="small" style="margin-top:6px">${esc(trunc(p.healthReason || p.summary, 140))}</p>${s && s.verdict ? `<div class="small"><b>${esc(s.verdict)}</b></div>` : ''}${ms}${ciLine}
+      <p class="small" style="margin-top:6px">${esc(trunc(p.summary, 140))}</p>${ms}${ciLine}
       ${canSeeHistory() ? `<div class="muted small">${la ? `${esc(trunc(la.text, 90))} — ${esc(ago(la.date))}` : 'no activity logged'}</div>` : ''}</div>`;
   }
 
@@ -1764,15 +1779,8 @@
     const src = ciSource(id), lr = src ? headlineRun(src) : null, tab = ['ci', 'tests'].includes(S.route.tab) ? S.route.tab : '';
     const nLive = src ? liveRuns(src).length : 0, cat = S.catalogs[id];
     const tabs = `<div class="tabs"><button class="${tab ? '' : 'active'}" data-href="#/projects/${esc(id)}">Overview</button><button class="${tab === 'ci' ? 'active' : ''}" data-href="#/projects/${esc(id)}/ci">CI runs${nLive ? ` <span class="pill yellow"><span class="live-dot"></span>${nLive} was running</span>` : lr ? ' ' + resultPill(lr) : ''}</button>${cat ? `<button class="${tab === 'tests' ? 'active' : ''}" data-href="#/projects/${esc(id)}/tests">Tests${cat.error ? '' : ` <span class="pill">${cat.tests.length}</span>`}</button>` : ''}</div>`;
-    const verdict = src && src.verdict ? `<div class="sub" style="margin-top:4px"><b>${esc(src.verdict)}</b> <span class="muted">kept current by the collector</span></div>` : '';
-    const seen = (p.checkedAgainst || []).filter(Boolean);
-    const written = p.updatedOn
-      ? `<span class="muted" title="${esc(seen.join(' · '))}"> · description ${seen.length
-          ? `rebuilt from ${seen.length} live source${seen.length > 1 ? 's' : ''}`
-          : 'written by hand'} ${esc(ago(p.updatedOn))}</span>`
-      : '';
     const edit = canEditProject(p), pending = pendingOf(p), nSug = pending.length;
-    const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}${nSug ? ' ' + pill('purple', `${nSug} suggested`) : ''}</h1><div class="sub">${esc(p.code || '')}${p.healthReason ? ' · ' + esc(p.healthReason) : ''}${written}</div>${verdict}</div>
+    const head = `<div class="page-head"><div><h1>${dot(p.health)} ${esc(p.name)} ${pill(p.status)}${nSug ? ' ' + pill('purple', `${nSug} suggested`) : ''}</h1></div>
       <div class="actions">${canSeeHistory() ? `<button class="btn" data-act="log-act" data-project="${esc(id)}">Log update</button><button class="btn" data-act="log-blocker" data-project="${esc(id)}">Log blocker</button>` : ''}${edit ? `<button class="btn primary" data-act="edit-project" data-id="${esc(id)}">Edit</button>` : ''}${canSeeHistory() ? `<button class="btn danger ghost" data-act="del-project" data-id="${esc(id)}">Delete</button>` : ''}</div></div>`;
     const hand = ['health', 'healthReason'].some(k => p.edited?.[k] || (edit && p.suggested?.[k]));
     const health = hand ? `<div class="card" style="margin-bottom:14px"><h3>Health</h3><div>${dot(p.health)} ${esc(label(p.health))}${editedNote(p, 'health')}</div>${p.healthReason ? `<div class="small">${esc(p.healthReason)}${editedNote(p, 'healthReason')}</div>` : ''}${suggestBox(p, 'health')}${suggestBox(p, 'healthReason')}</div>` : '';
@@ -2106,7 +2114,7 @@
     const ls = lessonsOf(c);
     const enrolled = learning().enrollments.filter(e => e.courseId === c.id).map(e => person(e.personId)).filter(Boolean).filter(p => canSeeLearningOf(p.id));
     // the rotated header is as tall as the longest lesson title needs, so nothing is clipped
-    const headH = Math.min(520, Math.max(150, Math.round(ls.reduce((n, l) => Math.max(n, (l.title || '').length), 0) * 7.1) + 18));
+    const headH = Math.min(260, Math.max(120, Math.round(ls.reduce((n, l) => Math.max(n, trunc(l.title, 32).length), 0) * 7.1) + 18));
     const cols = (c.phases || []).map(ph => `<th colspan="${(ph.lessons || []).length}" title="${esc(ph.name)}${ph.weeks ? ' · ' + esc(ph.weeks) : ''}">${esc(ph.name)}</th>`).join('');
     const rows = enrolled.map(p => { const sm = courseSummary(p.id, c.id); return `<tr><th class="person">${plink(p.id)}<div class="muted" style="font-weight:400">${sm.pct}% · ${sm.complete}/${sm.total}</div></th>${ls.map(l => { const pr = progressOf(p.id, l.id); return `<td class="cell ${pr.status}${sm.current?.id === l.id ? ' current' : ''}" data-person="${esc(p.id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="${esc(l.title)} — ${label(pr.status)}${pr.date ? ' · ' + esc(pr.date) : ''}${pr.note ? '&#10;' + esc(pr.note) : ''}">${LESSON_GLYPH[pr.status] || ''}</td>`; }).join('')}</tr>`; }).join('');
     return `<div class="page-head"><div><h1>Learning</h1><div class="sub">${cs.length} course${cs.length === 1 ? '' : 's'} · tap a cell to advance its status; right-click, shift-click or long-press to set a note or date${canSeeHistory() ? '' : ' · only your own progress is shown'}</div></div>
@@ -2120,30 +2128,8 @@
       </div>
       <div class="legend"><span><span class="sw" style="background:transparent"></span>not started</span><span><span class="sw" style="background:color-mix(in srgb,var(--yellow) 45%,transparent)"></span>in progress</span><span><span class="sw" style="background:color-mix(in srgb,var(--green) 55%,transparent)"></span>done</span><span><span class="sw" style="background:var(--green)"></span>★ gate passed</span><span><span class="sw" style="background:color-mix(in srgb,var(--red) 60%,transparent)"></span>! stuck</span><span><span class="sw" style="box-shadow:inset 0 0 0 2px var(--accent)"></span>current lesson</span></div>
       <div class="hint" style="margin-top:8px" aria-live="polite">${S.lastCell ? `${esc(S.lastCell.person)} · ${esc(S.lastCell.title)} → <b>${esc(label(S.lastCell.status))}</b>` : 'The lesson and new status of the last cell you tap show here.'}</div>
-      <div class="matrix-wrap" style="margin-top:8px"><table class="matrix"><thead><tr class="phases"><th class="person"></th>${cols}</tr><tr class="lessons"><th class="person">Person</th>${ls.map(l => `<th title="${esc(l.title)}" style="height:${headH}px">${esc(l.title)}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td class="empty" colspan="${ls.length + 1}" style="padding:14px">${canSeeHistory() ? 'Nobody enrolled yet — use “Enroll someone”.' : signedInAs() ? 'You are not enrolled in this course.' : esc(learningLock())}</td></tr>`}</tbody></table></div>
+      <div class="matrix-wrap" style="margin-top:8px"><table class="matrix"><thead><tr class="phases"><th class="person"></th>${cols}</tr><tr class="lessons"><th class="person">Person</th>${ls.map(l => `<th title="${esc(l.title)}" style="height:${headH}px">${esc(trunc(l.title, 32))}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td class="empty" colspan="${ls.length + 1}" style="padding:14px">${canSeeHistory() ? 'Nobody enrolled yet — use “Enroll someone”.' : signedInAs() ? 'You are not enrolled in this course.' : esc(learningLock())}</td></tr>`}</tbody></table></div>
       <div class="section" style="margin-top:20px"><div class="section-head"><h2>Lesson index</h2></div><div class="card tbl-wrap"><table class="tbl small"><thead><tr><th>#</th><th>Phase</th><th>Lesson</th><th>File</th><th>Gate / capstone</th></tr></thead><tbody>${ls.map((l, i) => `<tr><td>${i + 1}</td><td class="muted">${esc(l.phaseName)}</td><td>${esc(l.title)}</td><td class="mono muted">${esc(l.file || '')}</td><td class="muted">${esc(l.gate || l.capstone || '')}</td></tr>`).join('')}</tbody></table></div></div>`;
-  }
-
-  function vActivity() {
-    const f = S.actFilter || { person: '', project: '', type: '', range: '30', q: '' };
-    const t = today();
-    let list = acts().slice().sort(byDateDesc);
-    if (f.person) list = list.filter(a => a.personId === f.person);
-    if (f.project) list = list.filter(a => a.projectId === f.project);
-    if (f.type) list = list.filter(a => a.type === f.type);
-    if (f.range !== 'all') list = list.filter(a => daysBetween(a.date, t) <= Number(f.range));
-    if (f.q) { const q = f.q.toLowerCase(); list = list.filter(a => (a.text || '').toLowerCase().includes(q)); }
-    const groups = [];
-    for (const a of list) { const g = groups[groups.length - 1]; if (g && g.date === a.date) g.items.push(a); else groups.push({ date: a.date, items: [a] }); }
-    return `<div class="page-head"><div><h1>Activity</h1><div class="sub">${list.length} of ${acts().length} entries</div></div><div class="actions"><button class="btn" data-act="log-11">Log 1:1</button><button class="btn" data-act="log-blocker">Log blocker</button><button class="btn primary" data-act="log-act">Log activity</button></div></div>
-      <div class="filters">
-        <select data-af="range"><option value="7"${f.range === '7' ? ' selected' : ''}>last 7 days</option><option value="30"${f.range === '30' ? ' selected' : ''}>last 30 days</option><option value="90"${f.range === '90' ? ' selected' : ''}>last 90 days</option><option value="all"${f.range === 'all' ? ' selected' : ''}>all time</option></select>
-        <select data-af="person"><option value="">any person</option>${people().map(p => `<option value="${esc(p.id)}"${f.person === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
-        <select data-af="project"><option value="">any project</option>${projects().map(p => `<option value="${esc(p.id)}"${f.project === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
-        <select data-af="type"><option value="">any type</option>${ACT_TYPES.map(x => `<option value="${x}"${f.type === x ? ' selected' : ''}>${label(x)}</option>`).join('')}</select>
-        <input type="search" data-af="q" placeholder="search text" value="${esc(f.q)}">
-      </div>
-      ${groups.map(g => `<div class="section"><div class="section-head"><h3>${esc(g.date)} <span class="muted small">${esc(ago(g.date))}</span></h3></div><div class="card">${g.items.map(a => actRow(a)).join('')}</div></div>`).join('') || '<div class="empty">No entries in this range.</div>'}`;
   }
 
   function vData() {
@@ -2441,8 +2427,8 @@
   }
 
   // ---------- nav + router
-  const NAV = [['dashboard', 'Dashboard', '⌂', 'Home'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['stats', 'Team stats', '∑', 'Stats'], ['activity', 'Activity', '≡'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
-  const LEAD_ONLY = new Set(['activity', 'stats']);
+  const NAV = [['dashboard', 'Dashboard', '⌂', 'Home'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['stats', 'Team stats', '∑', 'Stats'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
+  const LEAD_ONLY = new Set(['stats']);
   const navHref = k => k === 'dashboard' ? '#/' : k === 'learning' && !canSeeHistory() && signedInAs() ? `#/people/${signedInAs()}/learning` : `#/${k}`;
   function navKey() {
     const r = S.route;
@@ -2482,7 +2468,7 @@
     const ae = document.activeElement, caret = ae && ae.dataset && ae.dataset.cf === 'q' ? [ae.selectionStart, ae.selectionEnd] : null;
     const views = {
       dashboard: () => vDashboard(), projects: () => r.id ? vProject(r.id) : vProjects(), people: () => r.id ? vPerson(r.id) : vPeople(),
-      learning: () => vLearning(r.id), activity: () => canSeeHistory() ? vActivity() : vDashboard(), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
+      learning: () => vLearning(r.id), activity: () => vDashboard(), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
     };
     const notice = S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
@@ -2500,7 +2486,6 @@
   function bind(v) {
     $$('[data-href]', v).forEach(el => el.addEventListener('click', e => { if (e.target.closest('a,button:not([data-href])')) return; location.hash = el.dataset.href; }));
     $$('[data-filter]', v).forEach(el => el.addEventListener('change', () => { S.filter = { ...(S.filter || {}), [el.dataset.filter]: el.value }; render(); }));
-    $$('[data-af]', v).forEach(el => el.addEventListener(el.type === 'search' ? 'input' : 'change', () => { S.actFilter = { ...(S.actFilter || { person: '', project: '', type: '', range: '30', q: '' }), [el.dataset.af]: el.value }; if (el.type === 'search') { const pos = el.selectionStart; render(); const n = $('[data-af="q"]'); n.focus(); n.setSelectionRange(pos, pos); } else render(); }));
     $$('.lesson-status', v).forEach(el => el.addEventListener('change', async () => { await setLesson(el.dataset.person, el.dataset.lesson, el.value); render(); }));
     $$('[data-cf]', v).forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => { catFilterOf(el.dataset.project)[el.dataset.cf] = el.value; paintCatalog(el.dataset.project); }));
     $$('td.cell', v).forEach(td => {
