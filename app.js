@@ -1,10 +1,13 @@
 (() => {
   'use strict';
 
-  const COLLECTIONS = ['settings', 'people', 'projects', 'activities', 'curriculum', 'learning', 'ci', 'messages'];
+  const COLLECTIONS = ['settings', 'people', 'projects', 'activities', 'curriculum', 'learning', 'ci', 'messages', 'leadcourses', 'leadlearning'];
   // The log is the lead's own record. It lives in a separate repository nobody else is on, so a
-  // team member's token cannot reach it by going around this page.
-  const PRIVATE = new Set(['activities']);
+  // team member's token cannot reach it by going around this page. The lead's own courses, their
+  // lessons and the marks on them live there too.
+  const PRIVATE = new Set(['activities', 'leadcourses', 'leadlearning']);
+  // Whether the private repository is reachable is decided by the log alone.
+  const LOG = 'activities';
   const LS = 'team-tracker:';
   const S = { data: {}, server: false, dataDir: '', localOverride: false, route: { name: 'dashboard', id: null, tab: null } };
 
@@ -17,6 +20,8 @@
     learning: () => ({ enrollments: [], progress: {} }),
     ci: () => ({ collectedAt: '', sources: [] }),
     messages: () => [],
+    leadcourses: () => ({ courses: [] }),
+    leadlearning: () => ({ enrollments: [], progress: {} }),
   };
 
   const STATUS = ['active', 'paused', 'parked', 'done'];
@@ -70,8 +75,8 @@
     const d = DEFAULTS[c]();
     if (Array.isArray(d)) return Array.isArray(obj) ? obj : d;
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return d;
-    if (c === 'learning') { obj.enrollments = Array.isArray(obj.enrollments) ? obj.enrollments : []; obj.progress = obj.progress && typeof obj.progress === 'object' && !Array.isArray(obj.progress) ? obj.progress : {}; }
-    if (c === 'curriculum') obj.courses = Array.isArray(obj.courses) ? obj.courses : [];
+    if (c === 'learning' || c === 'leadlearning') { obj.enrollments = Array.isArray(obj.enrollments) ? obj.enrollments : []; obj.progress = obj.progress && typeof obj.progress === 'object' && !Array.isArray(obj.progress) ? obj.progress : {}; }
+    if (c === 'curriculum' || c === 'leadcourses') obj.courses = Array.isArray(obj.courses) ? obj.courses : [];
     if (c === 'ci') obj.sources = Array.isArray(obj.sources) ? obj.sources : [];
     return obj;
   }
@@ -216,15 +221,17 @@
     for (const c of COLLECTIONS) {
       let obj = null;
       const priv = PRIVATE.has(c) && S.backend === 'github';
-      if (!(S.backend === 'github' && S.ghError && !priv)) {
+      // The rest of the private repository is only asked for once the log has shown it is reachable.
+      const shut = PRIVATE.has(c) && c !== LOG && S.privateOk !== true;
+      if (!shut && !(S.backend === 'github' && S.ghError && !priv)) {
         try {
           obj = await fetchCollection(c);
-          if (priv) S.privateOk = obj !== null;
+          if (priv && c === LOG) S.privateOk = obj !== null;
         } catch (e) {
           if (S.server) S.broken.add(c);
           // A token that cannot reach the lead's repository is not a broken connection. It belongs
           // to a team member, and for them the log does not exist at all.
-          if (priv) S.privateOk = false;
+          if (priv) { if (c === LOG) S.privateOk = false; }
           else if (S.backend === 'github') S.ghError = e.message;
         }
       }
@@ -352,6 +359,9 @@
   // person counts, so no edit made in this page can move it.
   const signedInAs = () => S.me || '';
   const canSeeLearningOf = pid => canSeeHistory() || (!!pid && pid === signedInAs());
+  // Lesson marks, with their dates and notes, are personal: everybody, the lead included, sets
+  // and edits only their own.
+  const canMarkLearningOf = pid => !!pid && pid === editorId();
   // A person's thread is between that person and the lead.
   const canSeeThreadOf = pid => canSeeHistory() || (!!pid && pid === signedInAs());
   // The lead edits every project. A project's own lead edits what is written and planned in it;
@@ -372,9 +382,23 @@
     if (loginHolders(S.ghUser).length > 1) return `More than one person on the team carries the GitHub username ${S.ghUser}, so none of them is taken to be you and no learning progress is shown.`;
     return `No person on the team carries the GitHub username ${S.ghUser}, so no learning progress is shown.`;
   }
-  // A course marked leadOnly (the lead's own track) is not shown to anyone else.
-  const courses = () => S.data.curriculum.courses.filter(c => !c.leadOnly || canSeeHistory());
+  // A course marked leadOnly (the lead's own track) is not shown to anyone else. The lead's own
+  // courses, kept in the private repository, come after the shared ones and only for the lead.
+  const sharedCourses = () => S.data.curriculum.courses.filter(c => !c.leadOnly || canSeeHistory());
+  const ownCourses = () => canSeeHistory() ? S.data.leadcourses.courses : [];
+  const courses = () => [...sharedCourses(), ...ownCourses()];
+  const isOwnCourse = id => ownCourses().some(c => c.id === id);
+  // The shared enrollments and marks. Those of the lead's own courses are kept in `leadlearning`.
   const learning = () => S.data.learning;
+  let ownIdx = { src: null, lessons: new Set() };
+  function ownLessons() {
+    const src = canSeeHistory() ? S.data.leadcourses : null;
+    if (ownIdx.src !== src) ownIdx = { src, lessons: new Set(src ? src.courses.flatMap(c => lessonsOf(c).map(l => l.id)) : []) };
+    return ownIdx.lessons;
+  }
+  // The collection that holds a lesson's marks, and the one that holds a course's enrollments.
+  const lessonStore = lid => ownLessons().has(lid) ? 'leadlearning' : 'learning';
+  const courseStore = cid => isOwnCourse(cid) ? 'leadlearning' : 'learning';
   const person = id => people().find(p => p.id === id);
   const project = id => projects().find(p => p.id === id);
   const course = id => courses().find(c => c.id === id);
@@ -932,8 +956,9 @@
       $('[data-x]', bg).focus();
     }
   }
-  const progressOf = (pid, lid) => learning().progress[`${pid}|${lid}`] || { status: 'not-started' };
-  const enrollmentsOf = pid => learning().enrollments.filter(e => e.personId === pid);
+  const progressOf = (pid, lid) => S.data[lessonStore(lid)].progress[`${pid}|${lid}`] || { status: 'not-started' };
+  const allEnrollments = () => canSeeHistory() ? [...learning().enrollments, ...S.data.leadlearning.enrollments] : learning().enrollments;
+  const enrollmentsOf = pid => allEnrollments().filter(e => e.personId === pid);
   const visibleLearning = () => canSeeHistory() ? learning() : {
     enrollments: learning().enrollments.filter(e => canSeeLearningOf(e.personId)),
     progress: Object.fromEntries(Object.entries(learning().progress).filter(([k]) => canSeeLearningOf(k.slice(0, k.indexOf('|'))))),
@@ -983,10 +1008,10 @@
     l.progress[key] = e;
   }
   // A conflict reloads the file and applies the change again on top, so nobody's marks are lost.
-  async function saveLearning(mutate) {
+  async function saveLearning(mutate, coll = 'learning') {
     for (let i = 0; ; i++) {
-      mutate(learning());
-      const r = await save('learning', { replay: i < 2 });
+      mutate(S.data[coll]);
+      const r = await save(coll, { replay: i < 2 });
       if (r !== 'conflict') return r;
     }
   }
@@ -1575,43 +1600,50 @@
     a.resolved = !a.resolved; a.resolvedOn = a.resolved ? today() : ''; await save('activities'); render();
   }
 
-  // Enrollments, and the quarter goal on them, are the lead's to set.
+  // Enrollments, and the quarter goal on them, are the lead's to set. The lead's own courses take
+  // nobody but the lead.
+  const enrollable = pid => courses().filter(c => !isOwnCourse(c.id) || pid === editorId());
   async function enroll(pid, preset = {}) {
     if (!canSeeHistory() || !canSeeLearningOf(pid)) return;
-    const list = learning().enrollments;
-    const editing = preset.courseId ? list.find(e => e.personId === pid && e.courseId === preset.courseId) : null;
+    const opts = enrollable(pid);
+    if (preset.courseId && !opts.some(c => c.id === preset.courseId)) { toast('The lead’s own courses are for the lead only'); return; }
+    const listOf = cid => S.data[courseStore(cid)].enrollments;
+    const editing = preset.courseId ? listOf(preset.courseId).find(e => e.personId === pid && e.courseId === preset.courseId) : null;
     const v = await form(editing ? `Enrollment — ${pname(pid)}` : `Enroll ${pname(pid)}`, [
-      { key: 'courseId', label: 'Course', type: 'select', options: courses().map(c => ({ value: c.id, label: c.name })) },
+      { key: 'courseId', label: 'Course', type: 'select', options: opts.map(c => ({ value: c.id, label: c.name })) },
       { key: 'track', label: 'Track', type: 'select', options: opt(TRACKS), allowEmpty: true, emptyLabel: 'not set' },
       { key: 'startedOn', label: 'Started on', type: 'date' },
       { key: 'goal', label: 'Quarter goal', help: 'one measurable sentence' },
     ], { track: person(pid)?.track || '', startedOn: today(), ...(editing || {}), ...preset });
     if (!v) return;
-    const target = list.find(e => e.personId === pid && e.courseId === v.courseId);
+    const to = courseStore(v.courseId);
+    if (editing && courseStore(editing.courseId) !== to) { toast('Remove this enrollment and enroll again in the other course'); return; }
+    const target = listOf(v.courseId).find(e => e.personId === pid && e.courseId === v.courseId);
     if (editing && target && target !== editing) { toast('Already enrolled in that course'); return; }
-    if (editing) Object.assign(editing, v); else if (target) Object.assign(target, v); else list.push({ personId: pid, ...v });
-    await save('learning'); render();
+    if (editing) Object.assign(editing, v); else if (target) Object.assign(target, v); else listOf(v.courseId).push({ personId: pid, ...v });
+    await save(to); render();
   }
   async function unenroll(pid, courseId) {
     if (!canSeeHistory() || !canSeeLearningOf(pid)) return;
     if (!confirm(`Remove ${pname(pid)} from ${course(courseId)?.name}? Lesson marks are kept.`)) return;
-    learning().enrollments = learning().enrollments.filter(e => !(e.personId === pid && e.courseId === courseId));
-    await save('learning'); render();
+    const coll = courseStore(courseId);
+    S.data[coll].enrollments = S.data[coll].enrollments.filter(e => !(e.personId === pid && e.courseId === courseId));
+    await save(coll); render();
   }
   async function setLesson(pid, lid, status) {
-    if (!canSeeLearningOf(pid)) return false;
+    if (!canMarkLearningOf(pid)) return false;
     const at = nowIso();
-    return saveLearning(l => applyMark(l, pid, lid, status, undefined, at, ''));
+    return saveLearning(l => applyMark(l, pid, lid, status, undefined, at, ''), lessonStore(lid));
   }
   async function cycleLesson(pid, lid, title) {
-    if (!canSeeLearningOf(pid)) return;
+    if (!canMarkLearningOf(pid)) return;
     const cur = progressOf(pid, lid).status;
     const next = LESSON_STATUS[(LESSON_STATUS.indexOf(cur) + 1) % LESSON_STATUS.length];
     await setLesson(pid, lid, next);
     S.lastCell = { person: pname(pid), title: title || lid, status: next }; render();
   }
   async function editLesson(pid, lid, title) {
-    if (!canSeeLearningOf(pid)) return;
+    if (!canMarkLearningOf(pid)) return;
     const cur = progressOf(pid, lid), shown = cur.date || today();
     const v = await form(`${pname(pid)} — ${title}`, [
       { key: 'status', label: 'Status', type: 'select', options: opt(LESSON_STATUS) },
@@ -1620,7 +1652,7 @@
     ], { status: cur.status, date: shown, note: cur.note || '' });
     if (!v) return;
     const at = nowIso(), on = v.date && v.date !== shown ? v.date : '';
-    await saveLearning(l => applyMark(l, pid, lid, v.status, v.note, at, on));
+    await saveLearning(l => applyMark(l, pid, lid, v.status, v.note, at, on), lessonStore(lid));
     render();
   }
 
@@ -2048,7 +2080,7 @@
 
   function learningBlock(id, e) {
     const cs = courseSummary(id, e.courseId); if (!cs) return '';
-    const c = cs.course;
+    const c = cs.course, mine = canMarkLearningOf(id), own = isOwnCourse(c.id);
     return `<div class="card" style="margin-bottom:14px"><div class="section-head"><h3>${esc(c.name)} ${e.track ? pill('purple', e.track) : ''}</h3><div class="actions"><a class="btn sm" href="#/learning/${esc(c.id)}">matrix</a>${canSeeHistory() ? `<button class="btn sm" data-act="edit-enroll" data-person="${esc(id)}" data-course="${esc(c.id)}">edit</button><button class="btn sm" data-act="unenroll" data-person="${esc(id)}" data-course="${esc(c.id)}">remove</button>` : ''}</div></div>
       <div class="small muted">${e.startedOn ? `since ${esc(e.startedOn)} \u00b7 ` : ''}${cs.complete}/${cs.total} lessons \u00b7 ${cs.counts['gate-passed']} gates \u00b7 last mark ${esc(ago(cs.lastDate))}</div>
       ${e.goal ? `<div class="small"><span class="muted">Quarter goal:</span> ${esc(e.goal)}</div>` : ''}
@@ -2056,7 +2088,7 @@
       ${cs.current ? `<div class="small" style="margin-bottom:8px"><span class="muted">Now on:</span> <b>${esc(cs.current.title)}</b> <span class="muted">(${esc(cs.current.phaseName)})</span></div>` : '<div class="small" style="margin-bottom:8px">Course complete.</div>'}
       ${(c.phases || []).map(ph => { const ls = ph.lessons || []; const done = ls.filter(l => ['done', 'gate-passed'].includes(progressOf(id, l.id).status)).length;
         return `<details data-phase="${esc(c.id + ':' + ph.id)}" ${ls.some(l => l.id === cs.current?.id) ? 'open' : ''}><summary class="small"><b>${esc(ph.name)}</b> <span class="muted">${done}/${ls.length}</span></summary>
-          <div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Lesson</th><th>Status</th><th class="col-dates">Dates</th><th>Note</th><th></th></tr></thead><tbody>${ls.map(l => { const pr = progressOf(id, l.id), onPhone = lessonDatesCell(pr, ''); return `<tr><td class="lesson-name">${esc(l.title)}${l.gate ? `<div class="muted" style="font-size:.75rem">gate: ${esc(l.gate)}</div>` : ''}</td><td><select class="lesson-status" data-person="${esc(id)}" data-lesson="${esc(l.id)}">${LESSON_STATUS.map(st => `<option value="${st}"${pr.status === st ? ' selected' : ''}>${label(st)}</option>`).join('')}</select>${onPhone ? `<div class="small dates-m">${onPhone}</div>` : ''}</td><td class="small nowrap col-dates">${lessonDatesCell(pr)}</td><td class="muted">${esc(pr.note || '')}</td><td><button class="btn sm" data-act="edit-lesson" data-person="${esc(id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="note or date">note</button></td></tr>`; }).join('')}</tbody></table></div></details>`; }).join('')}
+          <div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Lesson</th><th>Status</th><th class="col-dates">Dates</th><th>Note</th><th></th></tr></thead><tbody>${ls.map(l => { const pr = progressOf(id, l.id), onPhone = lessonDatesCell(pr, ''); return `<tr><td class="lesson-name">${own ? `<a href="#/lesson/${esc(c.id)}/${esc(l.id)}">${esc(l.title)}</a>` : esc(l.title)}${l.gate ? `<div class="muted" style="font-size:.75rem">gate: ${esc(l.gate)}</div>` : ''}</td><td>${mine ? `<select class="lesson-status" data-person="${esc(id)}" data-lesson="${esc(l.id)}">${LESSON_STATUS.map(st => `<option value="${st}"${pr.status === st ? ' selected' : ''}>${label(st)}</option>`).join('')}</select>` : `<span class="pill ${esc(pr.status)}">${esc(label(pr.status))}</span>`}${onPhone ? `<div class="small dates-m">${onPhone}</div>` : ''}</td><td class="small nowrap col-dates">${lessonDatesCell(pr)}</td><td class="muted">${esc(pr.note || '')}</td><td>${mine ? `<button class="btn sm" data-act="edit-lesson" data-person="${esc(id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="note or date">note</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div></details>`; }).join('')}
     </div>`;
   }
 
@@ -2112,14 +2144,17 @@
   function vLearning(courseId) {
     const cs = courses(); if (!cs.length) return `<h1>Learning</h1><div class="empty">No curriculum loaded (data/curriculum.json).</div>`;
     const c = course(courseId) || cs[0];
-    const ls = lessonsOf(c);
-    const enrolled = learning().enrollments.filter(e => e.courseId === c.id).map(e => person(e.personId)).filter(Boolean).filter(p => canSeeLearningOf(p.id));
+    const ls = lessonsOf(c), own = isOwnCourse(c.id), me = editorId();
+    const enrolled = allEnrollments().filter(e => e.courseId === c.id).map(e => person(e.personId)).filter(Boolean).filter(p => canSeeLearningOf(p.id));
+    const read = l => own ? `<a href="#/lesson/${esc(c.id)}/${esc(l.id)}">${esc(l.title)}</a>` : esc(l.title);
     // the rotated header is as tall as the longest lesson title needs, so nothing is clipped
     const headH = Math.min(260, Math.max(120, Math.round(ls.reduce((n, l) => Math.max(n, trunc(l.title, 32).length), 0) * 7.1) + 18));
     const cols = (c.phases || []).map(ph => `<th colspan="${(ph.lessons || []).length}" title="${esc(ph.name)}${ph.weeks ? ' · ' + esc(ph.weeks) : ''}">${esc(ph.name)}</th>`).join('');
-    const rows = enrolled.map(p => { const sm = courseSummary(p.id, c.id); return `<tr><th class="person">${plink(p.id)}<div class="muted" style="font-weight:400">${sm.pct}% · ${sm.complete}/${sm.total}</div></th>${ls.map(l => { const pr = progressOf(p.id, l.id); return `<td class="cell ${pr.status}${sm.current?.id === l.id ? ' current' : ''}" data-person="${esc(p.id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="${esc(l.title)} — ${label(pr.status)}${pr.date ? ' · ' + esc(pr.date) : ''}${pr.note ? '&#10;' + esc(pr.note) : ''}">${LESSON_GLYPH[pr.status] || ''}</td>`; }).join('')}</tr>`; }).join('');
-    return `<div class="page-head"><div><h1>Learning</h1><div class="sub">${cs.length} course${cs.length === 1 ? '' : 's'} · tap a cell to advance its status; right-click, shift-click or long-press to set a note or date${canSeeHistory() ? '' : ' · only your own progress is shown'}</div></div>
-      <div class="actions">${canSeeHistory() ? `<button class="btn primary" data-act="enroll-any" data-course="${esc(c.id)}">Enroll someone</button>` : ''}</div></div>
+    const rows = enrolled.map(p => { const sm = courseSummary(p.id, c.id); return `<tr><th class="person">${plink(p.id)}<div class="muted" style="font-weight:400">${sm.pct}% · ${sm.complete}/${sm.total}</div></th>${ls.map(l => { const pr = progressOf(p.id, l.id); return `<td class="cell ${pr.status}${sm.current?.id === l.id ? ' current' : ''}${canMarkLearningOf(p.id) ? '' : ' ro'}" data-person="${esc(p.id)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}" title="${esc(l.title)} — ${label(pr.status)}${pr.date ? ' · ' + esc(pr.date) : ''}${pr.note ? '&#10;' + esc(pr.note) : ''}">${LESSON_GLYPH[pr.status] || ''}</td>`; }).join('')}</tr>`; }).join('');
+    const enrollBtn = !canSeeHistory() ? '' : !own ? `<button class="btn primary" data-act="enroll-any" data-course="${esc(c.id)}">Enroll someone</button>`
+      : me && !enrolled.some(p => p.id === me) ? `<button class="btn primary" data-act="enroll-me" data-course="${esc(c.id)}">Enroll me</button>` : '';
+    return `<div class="page-head"><div><h1>Learning</h1><div class="sub">${cs.length} course${cs.length === 1 ? '' : 's'} · tap a cell in your own row to advance its status; right-click, shift-click or long-press it to set a note or date · everyone marks only their own lessons${canSeeHistory() ? '' : ' · only your own progress is shown'}</div></div>
+      <div class="actions">${enrollBtn}</div></div>
       <div class="tabs">${cs.map(x => `<button class="${x.id === c.id ? 'active' : ''}" data-href="#/learning/${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>
       <div class="card" style="margin-bottom:14px"><h3>${esc(c.name)} <span class="pill">${esc(c.audience || '')}</span></h3><p class="small">${esc(c.description || '')}</p>
         <dl class="kv"><dt>Where</dt><dd class="mono small">${esc(c.path || '')}</dd><dt>Lessons</dt><dd>${ls.filter(counted).length}${ls.length > ls.filter(counted).length ? ` + ${ls.length - ls.filter(counted).length} extra (supplements, practicum)` : ''} in ${(c.phases || []).length} phases</dd>${c.language ? `<dt>Language</dt><dd>${esc(c.language)}</dd>` : ''}</dl>
@@ -2129,13 +2164,183 @@
       </div>
       <div class="legend"><span><span class="sw" style="background:transparent"></span>not started</span><span><span class="sw" style="background:color-mix(in srgb,var(--yellow) 45%,transparent)"></span>in progress</span><span><span class="sw" style="background:color-mix(in srgb,var(--green) 55%,transparent)"></span>done</span><span><span class="sw" style="background:var(--green)"></span>★ gate passed</span><span><span class="sw" style="background:color-mix(in srgb,var(--red) 60%,transparent)"></span>! stuck</span><span><span class="sw" style="box-shadow:inset 0 0 0 2px var(--accent)"></span>current lesson</span></div>
       <div class="hint" style="margin-top:8px" aria-live="polite">${S.lastCell ? `${esc(S.lastCell.person)} · ${esc(S.lastCell.title)} → <b>${esc(label(S.lastCell.status))}</b>` : 'The lesson and new status of the last cell you tap show here.'}</div>
-      <div class="matrix-wrap" style="margin-top:8px"><table class="matrix"><thead><tr class="phases"><th class="person"></th>${cols}</tr><tr class="lessons"><th class="person">Person</th>${ls.map(l => `<th title="${esc(l.title)}" style="height:${headH}px">${esc(trunc(l.title, 32))}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td class="empty" colspan="${ls.length + 1}" style="padding:14px">${canSeeHistory() ? 'Nobody enrolled yet — use “Enroll someone”.' : signedInAs() ? 'You are not enrolled in this course.' : esc(learningLock())}</td></tr>`}</tbody></table></div>
-      <div class="section" style="margin-top:20px"><div class="section-head"><h2>Lesson index</h2></div><div class="card tbl-wrap"><table class="tbl small"><thead><tr><th>#</th><th>Phase</th><th>Lesson</th><th>File</th><th>Gate / capstone</th></tr></thead><tbody>${ls.map((l, i) => `<tr><td>${i + 1}</td><td class="muted">${esc(l.phaseName)}</td><td>${esc(l.title)}</td><td class="mono muted">${esc(l.file || '')}</td><td class="muted">${esc(l.gate || l.capstone || '')}</td></tr>`).join('')}</tbody></table></div></div>`;
+      <div class="matrix-wrap" style="margin-top:8px"><table class="matrix"><thead><tr class="phases"><th class="person"></th>${cols}</tr><tr class="lessons"><th class="person">Person</th>${ls.map(l => `<th title="${esc(l.title)}" style="height:${headH}px">${own ? `<a href="#/lesson/${esc(c.id)}/${esc(l.id)}">${esc(trunc(l.title, 32))}</a>` : esc(trunc(l.title, 32))}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td class="empty" colspan="${ls.length + 1}" style="padding:14px">${canSeeHistory() ? (own ? 'Not enrolled yet — use “Enroll me”.' : 'Nobody enrolled yet — use “Enroll someone”.') : signedInAs() ? 'You are not enrolled in this course.' : esc(learningLock())}</td></tr>`}</tbody></table></div>
+      <div class="section" style="margin-top:20px"><div class="section-head"><h2>Lesson index</h2></div><div class="card tbl-wrap"><table class="tbl small"><thead><tr><th>#</th><th>Phase</th><th>Lesson</th><th>File</th><th>Gate / capstone</th></tr></thead><tbody>${ls.map((l, i) => `<tr><td>${i + 1}</td><td class="muted">${esc(l.phaseName)}</td><td>${read(l)}</td><td class="mono muted">${esc(l.file || '')}</td><td class="muted">${esc(l.gate || l.capstone || '')}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+
+  // ---------- the lesson reader: the lead's own courses keep their lessons as Markdown in the
+  // private repository (courses/<course>/<file>), so they reach nobody the log does not reach.
+  S.lessons = Object.create(null);
+  const LESSON_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/;
+  async function fetchLesson(c, l) {
+    if (!/^[a-z0-9-]+$/.test(c.id) || !LESSON_FILE.test(l.file || '')) throw new Error('this lesson has no file');
+    if (S.backend === 'github') {
+      const g = ghConfig();
+      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(LOG_REPO)}/contents/courses/${c.id}/${encodeURIComponent(l.file)}?ref=${encodeURIComponent(g.branch)}`,
+        { headers: { ...ghHeaders(), Accept: 'application/vnd.github.raw' }, cache: 'no-store' });
+      if (!r.ok) throw new Error(await ghError(r));
+      return r.text();
+    }
+    if (S.server) {
+      const r = await fetch(`/api/_lesson/${c.id}/${encodeURIComponent(l.file)}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status === 404 ? 'the lesson file is not there' : `the server answered ${r.status}`);
+      return r.text();
+    }
+    throw new Error('lessons open through GitHub or the local server');
+  }
+  function wantLesson(c, l) {
+    const key = `${c.id}/${l.id}`;
+    if (key in S.lessons) return;
+    S.lessons[key] = { loading: true };
+    fetchLesson(c, l).then(text => ({ text }), e => ({ error: (e && e.message) || 'unknown error' })).then(res => {
+      S.lessons[key] = res;
+      const r = S.route;
+      if (r.name === 'lesson' && r.id === c.id && (r.tab || '') === l.id) render();
+    });
+  }
+  const tocHtml = toc => `<details class="card lesson-toc"><summary>Contents</summary><ul class="plain">${toc.filter(h => h.level === 2).map(h => `<li><button type="button" class="linkish" data-goto="${esc(h.id)}">${esc(h.text)}</button></li>`).join('')}</ul></details>`;
+  function vLesson(courseId, lessonId) {
+    const c = course(courseId);
+    if (!c || !isOwnCourse(c.id)) return `<div class="empty">Lesson not found. <a href="#/learning">Back to learning</a></div>`;
+    const ls = lessonsOf(c), i = Math.max(0, ls.findIndex(l => l.id === lessonId)), l = ls[i];
+    if (!l) return `<div class="empty">This course has no lessons yet. <a href="#/learning/${esc(c.id)}">Back</a></div>`;
+    const key = `${c.id}/${l.id}`, st = S.lessons[key];
+    if (!st) wantLesson(c, l);
+    const me = editorId(), pr = me ? progressOf(me, l.id) : null;
+    const enrolled = !!me && enrollmentsOf(me).some(e => e.courseId === c.id);
+    const prev = ls[i - 1], next = ls[i + 1];
+    const nav = `<div class="lesson-nav">${prev ? `<a class="btn sm" href="#/lesson/${esc(c.id)}/${esc(prev.id)}">← ${esc(trunc(prev.title, 42))}</a>` : '<span></span>'}${next ? `<a class="btn sm" href="#/lesson/${esc(c.id)}/${esc(next.id)}">${esc(trunc(next.title, 42))} →</a>` : ''}</div>`;
+    const mark = enrolled && canMarkLearningOf(me)
+      ? `<select class="lesson-status" data-person="${esc(me)}" data-lesson="${esc(l.id)}" aria-label="status of this lesson">${LESSON_STATUS.map(s => `<option value="${s}"${pr.status === s ? ' selected' : ''}>${label(s)}</option>`).join('')}</select><button class="btn sm" data-act="edit-lesson" data-person="${esc(me)}" data-lesson="${esc(l.id)}" data-title="${esc(l.title)}">note</button>`
+      : '';
+    let body;
+    if (!st || st.loading) body = '<div class="empty">Loading the lesson…</div>';
+    else if (st.error) body = `<div class="empty">The lesson could not be read: ${esc(st.error)}.</div>`;
+    else { const md = renderMarkdown(st.text); body = `${md.toc.filter(h => h.level === 2).length > 2 ? tocHtml(md.toc) : ''}<article class="lesson-body">${md.html}</article>`; }
+    return `<div class="page-head"><div><div class="sub"><a href="#/learning/${esc(c.id)}">${esc(c.name)}</a> · ${esc(l.phaseName || '')} · lesson ${i + 1} of ${ls.length}</div>${pr && pr.note && enrolled ? `<div class="small muted">Your note: ${esc(pr.note)}</div>` : ''}</div>
+      <div class="actions lesson-mark">${mark}</div></div>${nav}${body}${nav}`;
+  }
+
+  // Markdown for the lesson reader: headings, paragraphs, nested lists with task boxes, tables,
+  // fenced code, block quotes, rules, and inline code, bold, italic and links. The text is escaped
+  // before any tag is added, so a lesson can only ever produce these tags. Self-contained, so its
+  // test can lift it out of this file.
+  function renderMarkdown(src) {
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const inline = s => {
+      const codes = [];
+      let t = String(s).replace(/(`+)([\s\S]+?)\1(?!`)/g, (m, ticks, code) => { codes.push(code.replace(/^ ([\s\S]*) $/, '$1')); return `\u0000${codes.length - 1}\u0000`; });
+      t = esc(t);
+      t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, txt, url) => `<a href="${url}" target="_blank" rel="noopener">${txt}</a>`);
+      t = t.replace(/(^|[\s(])(https?:\/\/[^\s<)]*[^\s<).,;:!?'"])/g, (m, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
+      t = t.replace(/\*\*\*([^*]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+      t = t.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+      t = t.replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![*\w])/g, '$1<em>$2</em>');
+      t = t.replace(/~~([^~]+?)~~/g, '<del>$1</del>');
+      t = t.replace(/(?: {2,}|\\)\n/g, '<br>').replace(/\n/g, ' ');
+      return t.replace(/\u0000(\d+)\u0000/g, (m, n) => `<code>${esc(codes[+n])}</code>`);
+    };
+    const plain = s => String(s).replace(/`/g, '').replace(/\*+/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').trim();
+    const indentOf = s => s.match(/^ */)[0].length;
+    const blank = s => !s.trim();
+    const FENCE = /^ *(`{3,}|~{3,})(.*)$/;
+    const HR = /^ {0,3}([-*_])( *\1){2,} *$/;
+    const HEAD = /^ {0,3}(#{1,6}) +(.*?)(?: +#+)? *$/;
+    const ITEM = /^( *)([-*+]|\d{1,9}[.)]) +(.*)$/;
+    const QUOTE = /^ {0,3}>/;
+    const SEP = /^ *\|? *:?-{3,}:? *(\| *:?-{3,}:? *)*\|? *$/;
+    const isTable = (ls, i) => /\|/.test(ls[i]) && i + 1 < ls.length && SEP.test(ls[i + 1]) && /\|/.test(ls[i + 1]);
+    const toc = [];
+    let hn = 0;
+    function list(ls, i) {
+      const first = ITEM.exec(ls[i]), base = first[1].length, ordered = /\d/.test(first[2]);
+      const start = ordered ? parseInt(first[2], 10) : 1, items = [];
+      while (i < ls.length) {
+        const m = ITEM.exec(ls[i]);
+        if (!m || m[1].length !== base || /\d/.test(m[2]) !== ordered) break;
+        const col = m[0].length - m[3].length, body = [m[3]];
+        i++;
+        while (i < ls.length) {
+          const l2 = ls[i];
+          if (blank(l2)) {
+            let j = i; while (j < ls.length && blank(ls[j])) j++;
+            if (j < ls.length && indentOf(ls[j]) > base) { for (; i < j; i++) body.push(''); continue; }
+            break;
+          }
+          const ind = indentOf(l2);
+          if (ind > base) { body.push(l2.slice(Math.min(ind, col))); i++; continue; }
+          const lazy = !ITEM.test(l2) && !FENCE.test(l2) && !HEAD.test(l2) && !HR.test(l2) && !QUOTE.test(l2) && !/\|/.test(l2) && !blank(body[body.length - 1]);
+          if (lazy) { body.push(l2.trim()); i++; continue; }
+          break;
+        }
+        items.push(body);
+        let j = i; while (j < ls.length && blank(ls[j])) j++;
+        const nm = j < ls.length ? ITEM.exec(ls[j]) : null;
+        if (j > i && nm && nm[1].length === base && /\d/.test(nm[2]) === ordered) i = j;
+      }
+      const li = body => {
+        let text = body.join('\n'), box = '';
+        const t = /^\[([ xX])\] +/.exec(text);
+        if (t) { box = `<span class="md-box" aria-hidden="true">${t[1] === ' ' ? '☐' : '☑'}</span> `; text = text.slice(t[0].length); }
+        // a tight item (no blank line inside) shows its first paragraph without a paragraph box
+        let inner = blocks(text.split('\n'));
+        if (!body.includes('')) inner = inner.replace(/^<p>([\s\S]*?)<\/p>/, '$1');
+        return `<li${box ? ' class="task"' : ''}>${box}${inner}</li>`;
+      };
+      const tag = ordered ? 'ol' : 'ul';
+      return { html: `<${tag}${ordered && start !== 1 ? ` start="${start}"` : ''}>${items.map(li).join('')}</${tag}>`, next: i };
+    }
+    function blocks(ls) {
+      let html = '', i = 0, m;
+      while (i < ls.length) {
+        const line = ls[i];
+        if (blank(line)) { i++; continue; }
+        if ((m = FENCE.exec(line))) {
+          const fence = m[1], ind = indentOf(line), code = [];
+          const close = new RegExp(`^ *${fence[0] === '`' ? '`' : '~'}{${fence.length},} *$`);
+          i++;
+          while (i < ls.length && !close.test(ls[i])) { code.push(ls[i].slice(Math.min(ind, indentOf(ls[i])))); i++; }
+          i++;
+          html += `<pre><code>${esc(code.join('\n'))}</code></pre>`;
+          continue;
+        }
+        if ((m = HEAD.exec(line))) {
+          const level = m[1].length, id = `md-h-${++hn}`;
+          if (level <= 3) toc.push({ id, level, text: plain(m[2]) });
+          html += `<h${level} id="${id}">${inline(m[2])}</h${level}>`;
+          i++; continue;
+        }
+        if (HR.test(line)) { html += '<hr>'; i++; continue; }
+        if (QUOTE.test(line)) {
+          const q = [];
+          while (i < ls.length && !blank(ls[i]) && QUOTE.test(ls[i])) { q.push(ls[i].replace(/^ {0,3}> ?/, '')); i++; }
+          html += `<blockquote>${blocks(q)}</blockquote>`;
+          continue;
+        }
+        if (isTable(ls, i)) {
+          const cells = r => r.trim().replace(/^\|/, '').replace(/(^|[^\\])\|$/, '$1').split(/(?<!\\)\|/).map(x => x.trim().replace(/\\\|/g, '|'));
+          const head = cells(line), align = cells(ls[i + 1]).map(x => /^:-+:$/.test(x) ? 'center' : /-:$/.test(x) ? 'right' : '');
+          const rows = [];
+          i += 2;
+          while (i < ls.length && !blank(ls[i]) && /\|/.test(ls[i])) { rows.push(cells(ls[i])); i++; }
+          const cell = (tag, x, k) => `<${tag}${align[k] ? ` style="text-align:${align[k]}"` : ''}>${inline(x)}</${tag}>`;
+          html += `<div class="tbl-wrap"><table class="md"><thead><tr>${head.map((x, k) => cell('th', x, k)).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${head.map((_, k) => cell('td', r[k] || '', k)).join('')}</tr>`).join('')}</tbody></table></div>`;
+          continue;
+        }
+        if (ITEM.test(line)) { const r = list(ls, i); html += r.html; i = r.next; continue; }
+        const p = [];
+        while (i < ls.length && !blank(ls[i]) && !FENCE.test(ls[i]) && !HEAD.test(ls[i]) && !HR.test(ls[i]) && !QUOTE.test(ls[i]) && !isTable(ls, i) && !(p.length && ITEM.test(ls[i]))) { p.push(ls[i].replace(/^ +/, '')); i++; }
+        html += `<p>${inline(p.join('\n'))}</p>`;
+      }
+      return html;
+    }
+    const html = blocks(String(src || '').replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n'));
+    return { html, toc };
   }
 
   function vData() {
     const st = settings();
-    const counts = COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => { const d = S.data[c]; const n = c === 'messages' ? `${visibleMessages().length}${canSeeHistory() ? '' : ' (your thread)'}` : Array.isArray(d) ? d.length : c === 'curriculum' ? courses().length + ' courses' : c === 'learning' ? (l => `${l.enrollments.length} enrollments, ${Object.keys(l.progress).length} marks${canSeeHistory() ? '' : ' (yours)'}`)(visibleLearning()) : '—'; return `<tr><td class="mono">${c}.json</td><td>${esc(String(n))}</td></tr>`; }).join('');
+    const counts = COLLECTIONS.filter(c => !PRIVATE.has(c) || canSeeHistory()).map(c => { const d = S.data[c]; const n = c === 'messages' ? `${visibleMessages().length}${canSeeHistory() ? '' : ' (your thread)'}` : Array.isArray(d) ? d.length : c === 'curriculum' ? visibleCurriculum().courses.length + ' courses' : c === 'leadcourses' ? d.courses.length + ' courses' : c === 'learning' ? (l => `${l.enrollments.length} enrollments, ${Object.keys(l.progress).length} marks${canSeeHistory() ? '' : ' (yours)'}`)(visibleLearning()) : c === 'leadlearning' ? `${d.enrollments.length} enrollments, ${Object.keys(d.progress).length} marks` : '—'; return `<tr><td class="mono">${c}.json</td><td>${esc(String(n))}</td></tr>`; }).join('');
     const theme = localStorage.getItem(LS + 'theme') || 'auto';
     const g = ghConfig();
     const sub = S.backend === 'server' ? `Server on — writing to <span class="mono">${esc(S.dataDir)}</span>` : S.backend === 'github' ? `Connected to GitHub — every save is a commit to <span class="mono">${esc(g.owner)}/${esc(g.repo)}</span>` : 'Not connected — edits stay in this browser until you export';
@@ -2178,7 +2383,7 @@
     for (const c of courses()) for (const l of lessonsOf(c)) if (!m.has(l.id)) m.set(l.id, { l, c });
     return m;
   }
-  const markList = () => Object.entries(learning().progress).flatMap(([k, pr]) => {
+  const markList = () => [learning().progress, ...(canSeeHistory() ? [S.data.leadlearning.progress] : [])].flatMap(Object.entries).flatMap(([k, pr]) => {
     const i = k.indexOf('|'), pid = k.slice(0, i), lid = k.slice(i + 1);
     return marksOf(pr).map(r => ({ pid, lid, ...r }));
   });
@@ -2435,6 +2640,7 @@
     const r = S.route;
     if (LEAD_ONLY.has(r.name) && !canSeeHistory()) return 'dashboard';
     if (!canSeeHistory() && r.name === 'people' && r.tab === 'learning' && r.id === signedInAs()) return 'learning';
+    if (r.name === 'lesson') return 'learning';
     return r.name;
   }
   function renderNav() {
@@ -2469,7 +2675,7 @@
     const ae = document.activeElement, caret = ae && ae.dataset && ae.dataset.cf === 'q' ? [ae.selectionStart, ae.selectionEnd] : null;
     const views = {
       dashboard: () => vDashboard(), projects: () => r.id ? vProject(r.id) : vProjects(), people: () => r.id ? vPerson(r.id) : vPeople(),
-      learning: () => vLearning(r.id), activity: () => vDashboard(), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
+      learning: () => vLearning(r.id), lesson: () => vLesson(r.id, r.tab), activity: () => vDashboard(), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
     };
     const notice = S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
@@ -2489,7 +2695,9 @@
     $$('[data-filter]', v).forEach(el => el.addEventListener('change', () => { S.filter = { ...(S.filter || {}), [el.dataset.filter]: el.value }; render(); }));
     $$('.lesson-status', v).forEach(el => el.addEventListener('change', async () => { await setLesson(el.dataset.person, el.dataset.lesson, el.value); render(); }));
     $$('[data-cf]', v).forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => { catFilterOf(el.dataset.project)[el.dataset.cf] = el.value; paintCatalog(el.dataset.project); }));
-    $$('td.cell', v).forEach(td => {
+    $$('[data-goto]', v).forEach(el => el.addEventListener('click', () => { const t = document.getElementById(el.dataset.goto); if (t) t.scrollIntoView({ block: 'start' }); }));
+    // Only the cells of the viewer's own row take a click; the rest only show their title.
+    $$('td.cell:not(.ro)', v).forEach(td => {
       const d = td.dataset; let pressTimer = null; let longPressed = false;
       td.addEventListener('click', e => {
         if (longPressed) { longPressed = false; return; }
@@ -2533,7 +2741,12 @@
         const v = await form('Enroll someone', [{ key: 'personId', label: 'Person', type: 'select', options: who }]);
         if (v && v.personId) return enroll(v.personId, { courseId: d.course }); return;
       }
-      case 'edit-enroll': { if (!canSeeHistory() || !canSeeLearningOf(d.person)) return; const e = learning().enrollments.find(x => x.personId === d.person && x.courseId === d.course); return enroll(d.person, e || { courseId: d.course }); }
+      case 'edit-enroll': { if (!canSeeHistory() || !canSeeLearningOf(d.person)) return; const e = S.data[courseStore(d.course)].enrollments.find(x => x.personId === d.person && x.courseId === d.course); return enroll(d.person, e || { courseId: d.course }); }
+      case 'enroll-me': {
+        if (!canSeeHistory()) return;
+        if (!editorId()) { toast('Add yourself to People with your GitHub username first', 4000); return; }
+        return enroll(editorId(), { courseId: d.course });
+      }
       case 'unenroll': return unenroll(d.person, d.course);
       case 'edit-lesson': return editLesson(d.person, d.lesson, d.title);
       case 'settings': return editSettings();
@@ -2558,7 +2771,8 @@
   // What the page does not show someone stays out of their export too.
   const LEARNING_FIELDS = ['track', 'weeklyLearningHours'];
   const visiblePeople = () => canSeeHistory() ? people() : people().map(p => canSeeLearningOf(p.id) ? p : Object.fromEntries(Object.entries(p).filter(([k]) => !LEARNING_FIELDS.includes(k))));
-  const visibleCurriculum = () => ({ ...S.data.curriculum, courses: courses() });
+  // The shared file only: the lead's own courses are exported as their own collection.
+  const visibleCurriculum = () => ({ ...S.data.curriculum, courses: sharedCourses() });
   // Pending suggestions, and the answers dismissed kept with the marks, go to whoever may settle them.
   const PUBLIC_PROJECT = ['id', 'name', 'code', 'status', 'health', 'leadId', 'memberIds', 'startedOn'];
   const visibleProjects = () => projects().map(p => {
