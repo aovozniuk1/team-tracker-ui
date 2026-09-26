@@ -2632,8 +2632,221 @@
     $('[data-copy]', bg).addEventListener('click', async () => { try { await navigator.clipboard.writeText(ta.value); toast('Copied'); } catch { ta.select(); toast('Select and copy manually'); } });
   }
 
+  // ---------- the onboarding assistant: a search over how-to entries and the passages of the two
+  // onboarding documents, kept in data/assistant.json and fetched only when the page is opened.
+  // No model behind it: the entries are the answers.
+  S.asst = { kb: undefined, loading: false, error: '', thread: null, scroll: false };
+  const ASK_KEY = LS + 'assistant-thread';
+  const ASK_EXAMPLES = ['Як створити sandbox?', 'Як додати новий статус задачі?', 'Як здавати завдання?', 'Що потрібно для переходу в blueprint?', 'Як отримати токен для CRM API?', 'How do I set up an SLA for issues?'];
+  async function fetchAssistant() {
+    if (S.backend === 'github') {
+      const g = ghConfig();
+      const r = await fetch(`${ghUrl('assistant')}?ref=${encodeURIComponent(g.branch)}`, { headers: { ...ghHeaders(), Accept: 'application/vnd.github.raw' }, cache: 'no-store' });
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(await ghError(r));
+      return JSON.parse(await r.text());
+    }
+    if (!S.server && /\.github\.io$/.test(location.hostname)) return null;
+    const r = await fetch(S.server ? '/api/assistant' : 'data/assistant.json', { cache: 'no-store' });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`the server answered ${r.status}`);
+    return r.json();
+  }
+  function wantAssistant() {
+    if (S.asst.kb !== undefined || S.asst.loading) return;
+    S.asst.loading = true;
+    fetchAssistant().then(kb => { S.asst.kb = kb && Array.isArray(kb.entries) ? kb : null; }, e => { S.asst.kb = null; S.asst.error = (e && e.message) || 'unknown error'; })
+      .then(() => { S.asst.loading = false; if (S.route.name === 'assistant') render(); });
+  }
+  const asstMap = (kb, k) => kb[k === 'entries' ? '_e' : '_p'] || (kb[k === 'entries' ? '_e' : '_p'] = new Map((kb[k] || []).map(x => [x.id, x])));
+  function thread() {
+    if (!S.asst.thread) {
+      try { S.asst.thread = JSON.parse(localStorage.getItem(ASK_KEY) || '[]'); } catch { S.asst.thread = []; }
+      if (!Array.isArray(S.asst.thread)) S.asst.thread = [];
+    }
+    return S.asst.thread;
+  }
+  function ask(item) {
+    S.asst.thread = [...thread(), { ...item, at: Date.now() }].slice(-20);
+    try { localStorage.setItem(ASK_KEY, JSON.stringify(S.asst.thread)); } catch { /* the thread just won't survive a reload */ }
+    S.asst.scroll = true;
+    if (location.hash === '#/assistant') render(); else location.hash = '#/assistant';
+  }
+  const dayLabel = (iso, lang = 'en-GB') => { const d = new Date(String(iso) + 'T12:00:00'); return isNaN(d) ? String(iso || '') : d.toLocaleDateString(lang, { day: 'numeric', month: 'long', year: 'numeric' }); };
+  const asstInline = s => { const h = renderMarkdown(String(s || '')).html; const m = h.match(/^<p>([\s\S]*)<\/p>$/); return m ? m[1] : h; };
+  const CHECKED_BY = { trial: 'Перевірено в тріалі Zoho One', help: 'Перевірено за довідкою Zoho', doc: 'З документа онбордингу' };
+  function asstEntry(e, weak) {
+    const ck = e.checked || {};
+    return `${weak ? '<div class="small muted">Найближче, що є в базі:</div>' : ''}<h3 class="asst-title">${esc(e.title)}</h3>
+      <div class="asst-meta">${pill('', e.product)}${pill('', e.topic)}${e.assignment ? pill('accent', e.assignment) : ''}</div>
+      <p>${asstInline(e.summary)}</p>
+      ${e.steps && e.steps.length ? `<ol class="asst-steps">${e.steps.map(s => `<li>${asstInline(s)}</li>`).join('')}</ol>` : ''}
+      ${e.notes && e.notes.length ? `<div class="asst-notes"><b>Корисно знати</b><ul>${e.notes.map(n => `<li>${asstInline(n)}</li>`).join('')}</ul></div>` : ''}
+      <div class="small muted">${esc(CHECKED_BY[ck.by] || 'Джерело не вказане')}${ck.on ? ` · ${esc(dayLabel(ck.on, 'uk-UA'))}` : ''}</div>`;
+  }
+  function asstPassage(p, words) {
+    const rx = words.length ? new RegExp(words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi') : null;
+    const i = rx ? p.text.search(rx) : -1, from = Math.max(0, i - 90);
+    const cut = p.text.slice(i < 0 ? 0 : from, (i < 0 ? 0 : from) + 260).replace(/\s+/g, ' ');
+    const mark = s => rx ? esc(s).replace(new RegExp(words.map(w => esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi'), m => `<mark>${m}</mark>`) : esc(s);
+    const where = [p.doc, ...(p.path || []).slice(0, -1)].join(' › ');
+    return `<details class="asst-doc"><summary><b>${esc(p.title)}</b><span class="small muted"> · ${esc(where)}</span><div class="small">${(i > 0 && from > 0) ? '…' : ''}${mark(cut)}…</div></summary><div class="asst-doc-text">${esc(p.text).replace(/\n/g, '<br>')}</div></details>`;
+  }
+  function asstTurn(kb, it) {
+    const E = asstMap(kb, 'entries'), P = asstMap(kb, 'passages');
+    let best = null, weak = false, rel = [], ps = [], words = [];
+    if (it.e) best = E.get(it.e) || null;
+    else {
+      const res = assistantSearch(kb, it.q), top = res.entries[0];
+      words = String(it.q).split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 3);
+      if (top) { best = E.get(top.id); weak = res.terms.length > 1 && top.matched / res.terms.length < 0.5; }
+      rel = res.entries.slice(1, 6).map(x => x.id); ps = res.passages.slice(0, 3).map(x => x.id);
+    }
+    if (best) {
+      rel = [...new Set([...(best.related || []), ...rel])].filter(id => id !== best.id && E.has(id)).slice(0, 5);
+      ps = [...new Set([...(best.docRefs || []), ...ps])].filter(id => P.has(id)).slice(0, 3);
+    }
+    const answer = best ? asstEntry(best, weak)
+      : ps.length ? '<p>Покрокової інструкції на це поки немає. Ось що про це кажуть документи онбордингу.</p>'
+      : `<p>У матеріалах онбордингу про це нічого не знайшлося. Спробуй слова з самого продукту (sandbox, blueprint, layout rule, task status, SLA…) або подивись <a href="#/assistant/browse">Browse</a>.</p>`;
+    return `<div class="asst-turn"><div class="asst-q">${esc(it.q)}</div><div class="card asst-a">${answer}
+      ${rel.length ? `<div class="asst-rel"><span class="small muted">Також по темі</span>${rel.map(id => `<button type="button" class="asst-chip" data-asst-e="${esc(id)}">${esc(E.get(id).title)}</button>`).join('')}</div>` : ''}
+      ${ps.length ? `<div class="asst-docs"><div class="small muted">У документах онбордингу</div>${ps.map(id => asstPassage(P.get(id), words)).join('')}</div>` : ''}</div></div>`;
+  }
+  function asstAsk(kb) {
+    const th = thread();
+    const intro = th.length ? '' : `<div class="card asst-intro"><p>Запитай, як щось зробити в онбордингу, Zoho CRM, Zoho Projects чи Zoho One, українською чи англійською. Відповідь — покрокова інструкція, складена за двома документами онбордингу й перевірками в тріалі Zoho One, а під нею — відповідні місця самих документів.</p><div class="asst-rel">${ASK_EXAMPLES.map(q => `<button type="button" class="asst-chip" data-asst-q="${esc(q)}">${esc(q)}</button>`).join('')}</div></div>`;
+    return `<div class="asst">${intro}${th.map(it => asstTurn(kb, it)).join('')}
+      <form class="asst-form" data-asst-form><input id="asst-q" name="q" type="search" autocomplete="off" placeholder="Постав питання" aria-label="Твоє питання" required><button class="btn primary" type="submit">Запитати</button>${th.length ? '<button class="btn ghost" type="button" data-act="asst-clear">Очистити</button>' : ''}</form></div>`;
+  }
+  const ASST_PRODUCTS = ['Onboarding', 'Zoho One', 'CRM', 'Projects'];
+  function asstBrowse(kb) {
+    return ASST_PRODUCTS.map(pr => {
+      const es = kb.entries.filter(e => e.product === pr);
+      if (!es.length) return '';
+      const topics = [...new Set(es.map(e => e.topic))];
+      return `<h2 class="asst-h">${esc(pr)} <span class="pill">${es.length}</span></h2>${topics.map(t => { const te = es.filter(e => e.topic === t);
+        return `<details class="card asst-topic"><summary>${esc(t)} <span class="pill">${te.length}</span></summary><ul class="plain">${te.map(e => `<li><button type="button" class="linkish" data-asst-e="${esc(e.id)}">${esc(e.title)}</button>${e.assignment ? ' <span class="small muted">' + esc(e.assignment) + '</span>' : ''}</li>`).join('')}</ul></details>`; }).join('')}`;
+    }).join('');
+  }
+  function asstChanges(kb) {
+    const by = k => kb.entries.filter(e => (e.checked || {}).by === k).length;
+    const ch = [...(kb.changes || [])].sort((a, b) => String(b.on).localeCompare(String(a.on)));
+    return `<div class="card"><p>Інструкцій: ${kb.entries.length}; розділів документів онбордингу: ${(kb.passages || []).length}. Перевірено в тріалі Zoho One: ${by('trial')}; за довідкою Zoho: ${by('help')}; лише з документів: ${by('doc')}.</p>
+      ${(kb.sources || []).length ? `<ul class="plain small">${kb.sources.map(s => `<li><b>${esc(s.title)}</b>${s.version ? ' · ' + esc(s.version) : ''}</li>`).join('')}</ul>` : ''}</div>
+      ${ch.length ? ch.map(c => `<div class="card asst-change"><div class="small muted">${esc(dayLabel(c.on, 'uk-UA'))}</div><div>${asstInline(c.text)}</div></div>`).join('') : '<div class="empty">Змін ще не записано.</div>'}`;
+  }
+  function asstReview(kb) {
+    const age = e => daysSince(String((e.checked || {}).on || '')) ?? 9999;
+    const es = [...kb.entries].sort((a, b) => age(b) - age(a) || a.id.localeCompare(b.id));
+    const due = es.filter(e => age(e) >= 7);
+    return `<div class="card"><p>For the weekly check: the oldest confirmations come first. An entry is due when its facts were last confirmed 7 or more days ago, or come only from the documents. ${due.length} of ${es.length} are due.</p></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Entry</th><th>Product</th><th>Checked</th><th></th></tr></thead><tbody>${es.map(e => `<tr><td><button type="button" class="linkish" data-asst-e="${esc(e.id)}">${esc(e.title)}</button></td><td>${esc(e.product)}</td><td class="nowrap">${esc(dayLabel((e.checked || {}).on))} · ${esc((e.checked || {}).by || '?')}</td><td>${age(e) >= 7 || (e.checked || {}).by === 'doc' ? pill('yellow', 'due') : ''}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  function vAssistant(tab) {
+    wantAssistant();
+    const kb = S.asst.kb, lead = canSeeHistory();
+    const t = tab === 'browse' || tab === 'changes' || (tab === 'review' && lead) ? tab : '';
+    const tabs = [['', 'Ask'], ['browse', 'Browse'], ['changes', 'What changed'], ...(lead ? [['review', 'Review']] : [])];
+    const head = `<div class="page-head"><div><h1>Assistant</h1><div class="sub">Покрокові відповіді за документами онбордингу й тріалом Zoho One${kb && kb.updatedOn ? ` · оновлено ${esc(dayLabel(kb.updatedOn, 'uk-UA'))}` : ''}</div></div></div>
+      <div class="tabs">${tabs.map(([k, l]) => `<button class="${t === k ? 'active' : ''}" data-href="#/assistant${k ? '/' + k : ''}">${l}</button>`).join('')}</div>`;
+    if (kb === undefined || S.asst.loading) return head + '<div class="empty">Завантажую базу знань…</div>';
+    if (!kb) return head + `<div class="empty">${S.asst.error ? `Базу знань не вдалося прочитати: ${esc(S.asst.error)}.` : S.backend === 'static' ? 'Щоб користуватися помічником, підключи GitHub на сторінці <a href="#/data">Data</a>.' : 'У цьому репозиторії ще немає бази знань.'}</div>`;
+    return head + (t === 'browse' ? asstBrowse(kb) : t === 'changes' ? asstChanges(kb) : t === 'review' ? asstReview(kb) : asstAsk(kb));
+  }
+
+  // Ranks the assistant's entries and document passages for a question: BM25 over weighted fields,
+  // a light stemmer for English and Ukrainian, Ukrainian words mapped to the English terms the
+  // entries use, and prefix matches for word forms the stemmer misses. Self-contained, so its test
+  // can lift it out of this file; the index is built once per knowledge base.
+  function assistantSearch(kb, query) {
+    const STOP = new Set(('a an the and or of to in on for with how do does did i my me is are be can could what where which who when why this that it its at by from as into about you your we our us not no should would will want need get use using there here then than any some one ' +
+      'як де що чи і й та а в у на до з із зі за для це цей ця ці те той мені мене мій моя я ми ви вони він вона його її їх треба потрібно можна можу який яка яке які коли чому зробити робити є був була було бути так там тут всі все щоб але якщо ж би б не ні').split(' '));
+    const SYN = {
+      пісочниц: ['sandbox'], середовищ: ['environment', 'sandbox'], пол: ['field'], полі: ['field'], макет: ['layout'], правил: ['rule'], валідац: ['validation'],
+      угод: ['deal'], лід: ['lead'], лiд: ['lead'], контакт: ['contact'], акаунт: ['account'], компані: ['account', 'company'], задач: ['task'], підзадач: ['subtask'],
+      проєкт: ['project'], проект: ['project'], статус: ['status'], рол: ['role'], профіл: ['profile'], користувач: ['user'], модул: ['module'], запис: ['record'],
+      звіт: ['report'], процес: ['process', 'blueprint'], погоджен: ['approval'], затвердж: ['approval'], схвален: ['approval'], ревю: ['review'], каденц: ['cadence'],
+      кіоск: ['kiosk'], майстер: ['wizard'], шаблон: ['template'], кошик: ['trash', 'recycle'], видал: ['delete', 'trash'], відновл: ['restore'], дашборд: ['dashboard'],
+      віджет: ['widget'], гант: ['gantt'], баг: ['issue', 'bug'], помилк: ['issue', 'bug', 'error'], ескалац: ['escalation', 'sla'], вебхук: ['webhook'],
+      сповіщен: ['notification', 'alert'], лист: ['email'], пошт: ['email'], імпорт: ['import'], експорт: ['export'], форум: ['forum'], сторінк: ['page'],
+      груп: ['group'], префікс: ['prefix'], залежн: ['dependency'], трудовитрат: ['timesheet', 'log'], бюджет: ['budget'], конверт: ['convert'], конвертац: ['conversion', 'convert'],
+      стаді: ['stage'], етап: ['stage'], воронк: ['pipeline'], ймовірн: ['probability'], токен: ['token'], ключ: ['key'], запит: ['request'], апі: ['api'],
+      доступ: ['access', 'permission'], дозвол: ['permission'], адмін: ['admin'], налаштуван: ['setup', 'settings'], налашт: ['setup', 'configure'], додат: ['add', 'app'],
+      створ: ['create'], змін: ['change', 'edit'], редаг: ['edit'], тест: ['test'], перевір: ['test', 'check', 'validation'], чекліст: ['checklist'], кейс: ['case'],
+      дефект: ['defect', 'bug'], здач: ['submit', 'deliverable'], зда: ['submit', 'deliverable'], папк: ['folder'], відео: ['video', 'recording'], скриншот: ['screenshot'],
+      посилан: ['link'], публічн: ['public'], приватн: ['private'], строг: ['strict'], архів: ['archive'], клієнт: ['client'], команд: ['team'], графік: ['schedule'],
+      розклад: ['schedule'], робоч: ['work', 'business'], годин: ['hour'], дедлайн: ['deadline', 'due'], термін: ['due', 'deadline'], підписк: ['subscription', 'plan'],
+      ліценз: ['license'], тріал: ['trial'], пробн: ['trial'], мобільн: ['mobile'], безпек: ['security'], журнал: ['log', 'audit'], автоматизац: ['automation', 'workflow'],
+      тімлід: ['team', 'lead'], тимлід: ['team', 'lead'], ментор: ['mentor'], керівник: ['lead', 'manager'], онбординг: ['onboarding'],
+      тригер: ['trigger'], умов: ['condition', 'criteria'], ді: ['action'], кнопк: ['button'], мапінг: ['mapping'], звязок: ['link'], звязк: ['link'], повязан: ['related', 'link'],
+    };
+    const stem = w => {
+      if (/^[a-z0-9]+$/.test(w)) {
+        let s = w;
+        if (s.length > 5 && s.endsWith('ing')) s = s.slice(0, -3);
+        else if (s.length > 4 && (s.endsWith('ies') || s.endsWith('ied'))) s = s.slice(0, -3) + 'y';
+        else if (s.length > 4 && s.endsWith('ed')) s = s.slice(0, -2);
+        else if (s.length > 4 && /(ss|x|ch|sh)es$/.test(s)) s = s.slice(0, -2);
+        else if (s.length > 3 && s.endsWith('s') && !s.endsWith('ss')) s = s.slice(0, -1);
+        if (s.length > 4 && s.endsWith('e')) s = s.slice(0, -1);
+        return s;
+      }
+      const m = w.match(/^(.{3,}?)(ями|ами|ові|еві|ого|ому|ими|іми|ій|ий|ої|ою|ею|ям|ам|ах|ях|ів|їв|ом|ем|ти|ть|ся|ись|ну|ні|а|я|у|ю|і|и|е|о|ь|й|ї|є)$/);
+      return m ? m[1] : w;
+    };
+    const toks = s => String(s || '').toLowerCase().replace(/ʼ|’|'/g, '').split(/[^\p{L}\p{N}]+/u).filter(w => w && !STOP.has(w)).map(stem);
+    const build = (docs, fields) => {
+      const tf = [], df = new Map(); let total = 0;
+      for (const d of docs) {
+        const m = new Map(); let len = 0;
+        for (const [k, w] of fields) {
+          const v = d[k], text = Array.isArray(v) ? v.join(' ') : typeof v === 'object' && v ? '' : v;
+          for (const t of toks(text)) { m.set(t, (m.get(t) || 0) + w); len += w; }
+        }
+        for (const t of m.keys()) df.set(t, (df.get(t) || 0) + 1);
+        tf.push({ id: d.id, m, len }); total += len;
+      }
+      return { tf, df, n: docs.length, avg: total / Math.max(1, docs.length), vocab: [...df.keys()] };
+    };
+    const idx = kb._searchIndex || (kb._searchIndex = {
+      e: build(kb.entries || [], [['title', 3], ['questions', 2.5], ['topic', 2], ['assignment', 2], ['product', 1], ['summary', 1.5], ['steps', 1], ['notes', 1]]),
+      p: build(kb.passages || [], [['title', 2], ['path', 1], ['text', 1]]),
+    });
+    const base = [...new Set(toks(query))];
+    // each wanted term remembers the word of the question it stands for
+    const want = new Map(base.map(t => [t, { w: 1, src: t }]));
+    for (const t of base) {
+      for (const k in SYN) {
+        if (!t.startsWith(k) || t.length - k.length > 3) continue;
+        for (const x of SYN[k]) { const s = stem(x); if (!want.has(s)) want.set(s, { w: 0.8, src: t }); }
+      }
+    }
+    const rank = ix => {
+      const terms = new Map();
+      const put = (t, w, src) => { const o = terms.get(t); if (!o || o.w < w) terms.set(t, { w, src }); };
+      for (const [t, { w, src }] of want) {
+        if (ix.df.has(t)) put(t, w, src);
+        if (t.length >= 4) for (const v of ix.vocab) if (v !== t && v.startsWith(t)) put(v, w * 0.7, src);
+      }
+      const out = [];
+      for (const d of ix.tf) {
+        let score = 0; const hit = new Set();
+        for (const [t, { w, src }] of terms) {
+          const f = d.m.get(t); if (!f) continue;
+          const df = ix.df.get(t), idf = Math.log(1 + (ix.n - df + 0.5) / (df + 0.5));
+          score += w * idf * (f * 2.2) / (f + 1.2 * (0.5 + 0.5 * d.len / ix.avg));
+          hit.add(src);
+        }
+        if (score > 0) out.push({ id: d.id, score, matched: hit.size });
+      }
+      return out.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+    };
+    return { terms: base, entries: base.length ? rank(idx.e) : [], passages: base.length ? rank(idx.p) : [] };
+  }
+
   // ---------- nav + router
-  const NAV = [['dashboard', 'Dashboard', '⌂', 'Home'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['stats', 'Team stats', '∑', 'Stats'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
+  const NAV = [['dashboard', 'Dashboard', '⌂', 'Home'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['assistant', 'Assistant', '?', 'Ask'], ['stats', 'Team stats', '∑', 'Stats'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
   const LEAD_ONLY = new Set(['stats']);
   const navHref = k => k === 'dashboard' ? '#/' : k === 'learning' && !canSeeHistory() && signedInAs() ? `#/people/${signedInAs()}/learning` : `#/${k}`;
   function navKey() {
@@ -2651,7 +2864,8 @@
   }
   function renderFab() {
     let fab = $('#fab');
-    if (!canSeeHistory()) { if (fab) fab.remove(); return; }
+    // the assistant keeps its question box where the button would sit
+    if (!canSeeHistory() || S.route.name === 'assistant') { if (fab) fab.remove(); return; }
     if (fab) return;
     fab = document.createElement('button');
     Object.assign(fab, { type: 'button', id: 'fab', className: 'fab', title: 'Log activity', textContent: '+' });
@@ -2675,7 +2889,7 @@
     const ae = document.activeElement, caret = ae && ae.dataset && ae.dataset.cf === 'q' ? [ae.selectionStart, ae.selectionEnd] : null;
     const views = {
       dashboard: () => vDashboard(), projects: () => r.id ? vProject(r.id) : vProjects(), people: () => r.id ? vPerson(r.id) : vPeople(),
-      learning: () => vLearning(r.id), lesson: () => vLesson(r.id, r.tab), activity: () => vDashboard(), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
+      learning: () => vLearning(r.id), lesson: () => vLesson(r.id, r.tab), assistant: () => vAssistant(r.id), activity: () => vDashboard(), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
     };
     const notice = S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
@@ -2688,6 +2902,11 @@
       window.scrollTo(0, y);
       const nm = $('.matrix-wrap', v); if (nm && mx) { nm.scrollLeft = mx[0]; nm.scrollTop = mx[1]; }
     } else window.scrollTo(0, 0);
+    if (r.name === 'assistant' && S.asst.scroll && S.asst.kb) {
+      S.asst.scroll = false;
+      const last = $$('.asst-turn', v).pop(); if (last) last.scrollIntoView({ block: 'start' });
+      const q = $('#asst-q', v); if (q) q.focus({ preventScroll: true });
+    }
   }
 
   function bind(v) {
@@ -2696,6 +2915,10 @@
     $$('.lesson-status', v).forEach(el => el.addEventListener('change', async () => { await setLesson(el.dataset.person, el.dataset.lesson, el.value); render(); }));
     $$('[data-cf]', v).forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => { catFilterOf(el.dataset.project)[el.dataset.cf] = el.value; paintCatalog(el.dataset.project); }));
     $$('[data-goto]', v).forEach(el => el.addEventListener('click', () => { const t = document.getElementById(el.dataset.goto); if (t) t.scrollIntoView({ block: 'start' }); }));
+    const af = $('[data-asst-form]', v);
+    if (af) af.addEventListener('submit', e => { e.preventDefault(); const q = af.elements.q.value.trim(); if (q) ask({ q }); });
+    $$('[data-asst-q]', v).forEach(b => b.addEventListener('click', () => ask({ q: b.dataset.asstQ })));
+    $$('[data-asst-e]', v).forEach(b => b.addEventListener('click', () => { const e = S.asst.kb && asstMap(S.asst.kb, 'entries').get(b.dataset.asstE); if (e) ask({ e: e.id, q: e.title }); }));
     // Only the cells of the viewer's own row take a click; the rest only show their title.
     $$('td.cell:not(.ro)', v).forEach(td => {
       const d = td.dataset; let pressTimer = null; let longPressed = false;
@@ -2742,6 +2965,11 @@
         if (v && v.personId) return enroll(v.personId, { courseId: d.course }); return;
       }
       case 'edit-enroll': { if (!canSeeHistory() || !canSeeLearningOf(d.person)) return; const e = S.data[courseStore(d.course)].enrollments.find(x => x.personId === d.person && x.courseId === d.course); return enroll(d.person, e || { courseId: d.course }); }
+      case 'asst-clear': {
+        S.asst.thread = [];
+        try { localStorage.removeItem(ASK_KEY); } catch { /* nothing kept */ }
+        return render();
+      }
       case 'enroll-me': {
         if (!canSeeHistory()) return;
         if (!editorId()) { toast('Add yourself to People with your GitHub username first', 4000); return; }
