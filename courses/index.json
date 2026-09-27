@@ -1,0 +1,257 @@
+{
+ "courses": [
+  {
+   "id": "zcrm",
+   "name": "Zoho CRM: курс онбордингу QA, 22 уроки",
+   "description": "Покроковий курс за документом онбордингу «ZCRM Start Onboarding QA»: кожен урок пояснює одну частину Zoho CRM з нуля, проводить крок за кроком через завдання документа в самому продукті, розбирає її з боку QA (що може зламатись, які кейси тестувати, які докази збирати) і закінчується типовими помилками, задачами з розв'язками та чеклистом. Кроки перевірено наживо в тріалі Zoho One (дата-центр EU) 25–27.09.2026. Назви з інтерфейсу подано англійською, як їх показує продукт.",
+   "phases": [
+    {
+     "id": "zcrm-phase-1",
+     "name": "Фаза 1 · Основи (уроки 1–8)",
+     "lessons": [
+      {
+       "id": "zcrm-01",
+       "file": "01-trial-and-tools.md",
+       "title": "Урок 1. Тріал, інструменти і правила здачі"
+      },
+      {
+       "id": "zcrm-02",
+       "file": "02-sandbox.md",
+       "title": "Урок 2. Sandbox: окреме середовище для змін"
+      },
+      {
+       "id": "zcrm-03",
+       "file": "03-data-model.md",
+       "title": "Урок 3. Модель даних: модулі, записи, поля, layouts, lookup і subform"
+      },
+      {
+       "id": "zcrm-04",
+       "file": "04-lead-to-deal.md",
+       "title": "Урок 4. Від ліда до угоди: конвертація і життєвий цикл угоди"
+      },
+      {
+       "id": "zcrm-05",
+       "file": "05-roles-profiles.md",
+       "title": "Урок 5. Користувачі, ролі та профілі"
+      },
+      {
+       "id": "zcrm-06",
+       "file": "06-fields-layouts.md",
+       "title": "Урок 6. Поля й макети сторінок (layouts)"
+      },
+      {
+       "id": "zcrm-07",
+       "file": "07-validation-layout-rules.md",
+       "title": "Урок 7. Правила layout і правила валідації"
+      },
+      {
+       "id": "zcrm-08",
+       "file": "08-blueprint-basics.md",
+       "title": "Урок 8. Blueprint: стани, переходи і власники переходів"
+      }
+     ]
+    },
+    {
+     "id": "zcrm-phase-2",
+     "name": "Фаза 2 · Автоматизація процесів (уроки 9–13)",
+     "lessons": [
+      {
+       "id": "zcrm-09",
+       "file": "09-pipelines-blueprint.md",
+       "title": "Урок 9. Pipelines і Blueprint: два процеси продажу в одному модулі"
+      },
+      {
+       "id": "zcrm-10",
+       "file": "10-journey-builder.md",
+       "title": "Урок 10. Journey Builder: процес через кілька модулів"
+      },
+      {
+       "id": "zcrm-11",
+       "file": "11-wizards.md",
+       "title": "Урок 11. Wizards: довга форма як кілька екранів"
+      },
+      {
+       "id": "zcrm-12",
+       "file": "12-workflow-rules.md",
+       "title": "Урок 12. Workflow rules: тригер, умова, дія"
+      },
+      {
+       "id": "zcrm-13",
+       "file": "13-connected-records.md",
+       "title": "Урок 13. Team modules, connected records і connected workflows"
+      }
+     ]
+    },
+    {
+     "id": "zcrm-phase-3",
+     "name": "Фаза 3 · Погодження, рецензування й cadences (уроки 14–18)",
+     "lessons": [
+      {
+       "id": "zcrm-14",
+       "file": "14-approval-setup.md",
+       "title": "Урок 14. Approval process: правила, етапи, дії"
+      },
+      {
+       "id": "zcrm-15",
+       "file": "15-approval-testing.md",
+       "title": "Урок 15. Погодження в дії: тестові потоки A17 і здача"
+      },
+      {
+       "id": "zcrm-16",
+       "file": "16-review-process.md",
+       "title": "Урок 16. Review Process: перевірка даних на вході"
+      },
+      {
+       "id": "zcrm-17",
+       "file": "17-cadences-setup.md",
+       "title": "Урок 17. Cadences: послідовні follow-up і їх налаштування"
+      },
+      {
+       "id": "zcrm-18",
+       "file": "18-cadences-testing.md",
+       "title": "Урок 18. Cadences: тестування гілок, виключення і повернення"
+      }
+     ]
+    },
+    {
+     "id": "zcrm-phase-4",
+     "name": "Фаза 4 · Кіоски й API (уроки 19–22)",
+     "lessons": [
+      {
+       "id": "zcrm-19",
+       "file": "19-kiosk-basics.md",
+       "title": "Урок 19. Kiosk Studio: основи і перший кіоск"
+      },
+      {
+       "id": "zcrm-20",
+       "file": "20-kiosk-routing.md",
+       "title": "Урок 20. Kiosk Studio: розгалуження, дії і тестування A20"
+      },
+      {
+       "id": "zcrm-21",
+       "file": "21-api-basics.md",
+       "title": "Урок 21. API Zoho CRM v8: REST, OAuth 2.0, ліміти і Postman"
+      },
+      {
+       "id": "zcrm-22",
+       "file": "22-api-postman.md",
+       "title": "Урок 22. A21: тестування Zoho CRM API v8 у Postman"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "zprojects",
+   "name": "Zoho Projects: курс онбордингу QA, 15 уроків",
+   "description": "Покроковий курс за документом онбордингу «ZProjects Start Onboarding QA»: Zoho One і Zoho Projects з нуля — проєкти, задачі, issues, автоматизація, blueprint, SLA, макети й правила — з проходом кожного завдання документа в продукті, розбором з боку QA, типовими помилками, задачами з розв'язками та чеклистом. Кроки перевірено наживо в тріалі Zoho One (дата-центр EU) 26–27.09.2026. Назви з інтерфейсу подано англійською, як їх показує продукт.",
+   "phases": [
+    {
+     "id": "zproj-phase-1",
+     "name": "Фаза 1 · Zoho One і проєкти (уроки 1–3)",
+     "lessons": [
+      {
+       "id": "zproj-01",
+       "file": "01-zoho-one.md",
+       "title": "Урок 1. Zoho One: платформа, застосунки і вхід у Projects"
+      },
+      {
+       "id": "zproj-02",
+       "file": "02-projects-basics.md",
+       "title": "Урок 2. Проєкти: список, створення, доступ і налаштування порталу"
+      },
+      {
+       "id": "zproj-03",
+       "file": "03-dashboard-templates-trash.md",
+       "title": "Урок 3. Дашборд, Gantt, пошта, кошик і шаблони проєктів"
+      }
+     ]
+    },
+    {
+     "id": "zproj-phase-2",
+     "name": "Фаза 2 · Задачі й issues (уроки 4–6)",
+     "lessons": [
+      {
+       "id": "zproj-04",
+       "file": "04-tasks-kanban.md",
+       "title": "Урок 4. Задачі, статуси і Kanban"
+      },
+      {
+       "id": "zproj-05",
+       "file": "05-subtasks-dependencies-rollup.md",
+       "title": "Урок 5. Підзадачі, залежності, roll-up і облік часу"
+      },
+      {
+       "id": "zproj-06",
+       "file": "06-issues.md",
+       "title": "Урок 6. Issues: баг-трекер усередині проєкту"
+      }
+     ]
+    },
+    {
+     "id": "zproj-phase-3",
+     "name": "Фаза 3 · Спільна робота й автоматизація проєкту (уроки 7–8)",
+     "lessons": [
+      {
+       "id": "zproj-07",
+       "file": "07-pages-forums.md",
+       "title": "Урок 7. Pages і Forums: знання та обговорення в проєкті"
+      },
+      {
+       "id": "zproj-08",
+       "file": "08-automation-views-groups.md",
+       "title": "Урок 8. Автоматизація, custom views і групи проєктів"
+      }
+     ]
+    },
+    {
+     "id": "zproj-phase-4",
+     "name": "Фаза 4 · Автоматизація задач та issues (уроки 9–12)",
+     "lessons": [
+      {
+       "id": "zproj-09",
+       "file": "09-task-blueprint.md",
+       "title": "Урок 9. Автоматизація задач і Blueprint"
+      },
+      {
+       "id": "zproj-10",
+       "file": "10-task-workflow-macro.md",
+       "title": "Урок 10. Workflow rules, macro rules, листи й вебхуки для задач"
+      },
+      {
+       "id": "zproj-11",
+       "file": "11-business-rules.md",
+       "title": "Урок 11. Business Rules для issues"
+      },
+      {
+       "id": "zproj-12",
+       "file": "12-sla.md",
+       "title": "Урок 12. SLA для issues"
+      }
+     ]
+    },
+    {
+     "id": "zproj-phase-5",
+     "name": "Фаза 5 · Макети й фінальне QA-завдання (уроки 13–15)",
+     "lessons": [
+      {
+       "id": "zproj-13",
+       "file": "13-layouts-fields.md",
+       "title": "Урок 13. Layouts і поля: з чого складається форма задачі та issue"
+      },
+      {
+       "id": "zproj-14",
+       "file": "14-layout-rules.md",
+       "title": "Урок 14. Layout rules: форма, що підлаштовується під відповіді"
+      },
+      {
+       "id": "zproj-15",
+       "file": "15-final-qa-assignment.md",
+       "title": "Урок 15. Фінальне QA-завдання: документація, прогін і звіт"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

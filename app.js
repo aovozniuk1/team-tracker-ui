@@ -2221,6 +2221,76 @@
       <div class="actions lesson-mark">${mark}</div></div>${nav}${body}${nav}`;
   }
 
+  // ---------- the courses published for anyone: courses/index.json and courses/<course>/<file> next
+  // to the page (publish_ui.py copies them into the Pages repository; serve.py serves them locally).
+  // No sign-in; a reader's progress stays in their own browser.
+  S.pub = { index: undefined, lessons: Object.create(null) };
+  const PUB_DONE = LS + 'pub-done';
+  const isPublicRoute = r => r.name === 'courses' || r.name === 'read';
+  const pubDone = () => { try { const o = JSON.parse(localStorage.getItem(PUB_DONE) || '{}'); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
+  function setPubDone(key, on) {
+    const d = pubDone();
+    if (on) d[key] = today(); else delete d[key];
+    try { localStorage.setItem(PUB_DONE, JSON.stringify(d)); } catch { toast('This browser does not keep progress (private window?)', 3000); }
+  }
+  function wantPubIndex() {
+    if (S.pub.index !== undefined) return;
+    S.pub.index = null;
+    fetch('courses/index.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(ix => { S.pub.index = ix && Array.isArray(ix.courses) ? ix : { courses: [] }; }, e => { S.pub.index = { courses: [], error: e.message }; })
+      .then(() => { if (isPublicRoute(S.route)) render(); });
+  }
+  function wantPubLesson(cid, l) {
+    const key = `${cid}/${l.id}`;
+    if (key in S.pub.lessons) return;
+    S.pub.lessons[key] = { loading: true };
+    fetch(`courses/${encodeURIComponent(cid)}/${encodeURIComponent(l.file)}`, { cache: 'no-cache' }).then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(text => ({ text }), e => ({ error: e.message })).then(res => { S.pub.lessons[key] = res; if (S.route.name === 'read') render(); });
+  }
+  const pubLessons = c => c.phases.flatMap(ph => ph.lessons.map(l => ({ ...l, phaseName: ph.name })));
+  const pubHead = () => S.backend === 'static' ? `<div class="pub-brand"><a href="#/courses">Zoho: курси онбордингу</a></div>` : '';
+  function pubState() {
+    wantPubIndex();
+    const ix = S.pub.index;
+    if (!ix) return { wait: `${pubHead()}<div class="empty">Завантажую курси…</div>` };
+    if (ix.error || !ix.courses.length) return { wait: `${pubHead()}<div class="empty">Курсів тут поки немає${ix.error ? ` (${esc(ix.error)})` : ''}.</div>` };
+    return { ix };
+  }
+  function vCourses() {
+    const { wait, ix } = pubState(); if (wait) return wait;
+    const done = pubDone();
+    return `${pubHead()}<div class="page-head"><div><h1>Zoho: курси онбордингу</h1><div class="sub">Покрокові курси з Zoho CRM і Zoho Projects: пояснення, прохід завдань у продукті, розбір з боку QA, задачі й розв'язки. Вхід не потрібен; позначки «пройдено» зберігаються лише в цьому браузері.</div></div></div>
+      <div class="pub-courses">${ix.courses.map(c => { const ls = pubLessons(c), n = ls.filter(l => done[`${c.id}/${l.id}`]).length;
+        return `<div class="card clickable" data-href="#/courses/${esc(c.id)}"><h3><a href="#/courses/${esc(c.id)}">${esc(c.name)}</a></h3><p class="small">${esc(c.description)}</p><div class="pub-progress"><span style="width:${ls.length ? Math.round(100 * n / ls.length) : 0}%"></span></div><div class="small muted">Пройдено ${n} з ${ls.length}</div></div>`; }).join('')}</div>`;
+  }
+  function vCourse(cid) {
+    const { wait, ix } = pubState(); if (wait) return wait;
+    const c = ix.courses.find(x => x.id === cid);
+    if (!c) return `${pubHead()}<div class="empty">Такого курсу немає. <a href="#/courses">Усі курси</a></div>`;
+    const done = pubDone(), ls = pubLessons(c), next = ls.find(l => !done[`${c.id}/${l.id}`]) || ls[0];
+    let i = 0;
+    return `${pubHead()}<div class="page-head"><div><div class="sub"><a href="#/courses">Усі курси</a></div><h1>${esc(c.name)}</h1><div class="sub">${esc(c.description)}</div></div>
+      <div class="actions">${next ? `<a class="btn primary" href="#/read/${esc(c.id)}/${esc(next.id)}">${ls.some(l => done[`${c.id}/${l.id}`]) ? 'Продовжити' : 'Почати'}</a>` : ''}</div></div>
+      ${c.phases.map(ph => `<div class="card pub-phase"><h3>${esc(ph.name)}</h3><ol start="${i + 1}" class="pub-lessons">${ph.lessons.map(l => { i++; const d = done[`${c.id}/${l.id}`];
+        return `<li class="${d ? 'done' : ''}"><a href="#/read/${esc(c.id)}/${esc(l.id)}">${esc(l.title)}</a>${d ? ` <span class="small muted">✓ ${esc(dayLabel(d, "uk-UA"))}</span>` : ''}</li>`; }).join('')}</ol></div>`).join('')}`;
+  }
+  function vRead(cid, lid) {
+    const { wait, ix } = pubState(); if (wait) return wait;
+    const c = ix.courses.find(x => x.id === cid);
+    const ls = c ? pubLessons(c) : [], i = ls.findIndex(l => l.id === lid), l = ls[i];
+    if (!l) return `${pubHead()}<div class="empty">Такого уроку немає. <a href="#/courses">Усі курси</a></div>`;
+    const key = `${c.id}/${l.id}`, st = S.pub.lessons[key];
+    if (!st) wantPubLesson(c.id, l);
+    const prev = ls[i - 1], next = ls[i + 1], done = pubDone()[key];
+    const nav = `<div class="lesson-nav">${prev ? `<a class="btn sm" href="#/read/${esc(c.id)}/${esc(prev.id)}">← ${esc(trunc(prev.title, 42))}</a>` : '<span></span>'}${next ? `<a class="btn sm" href="#/read/${esc(c.id)}/${esc(next.id)}">${esc(trunc(next.title, 42))} →</a>` : ''}</div>`;
+    let body;
+    if (!st || st.loading) body = '<div class="empty">Завантажую урок…</div>';
+    else if (st.error) body = `<div class="empty">Урок не вдалося завантажити: ${esc(st.error)}.</div>`;
+    else { const md = renderMarkdown(st.text); body = `${md.toc.filter(h => h.level === 2).length > 2 ? tocHtml(md.toc).replace('<summary>Contents</summary>', '<summary>Зміст</summary>') : ''}<article class="lesson-body">${md.html}</article>`; }
+    return `${pubHead()}<div class="page-head"><div><div class="sub"><a href="#/courses/${esc(c.id)}">${esc(c.name)}</a> · ${esc(l.phaseName)} · урок ${i + 1} з ${ls.length}</div></div>
+      <div class="actions"><button class="btn sm ${done ? 'primary' : ''}" data-act="pub-done" data-key="${esc(key)}" aria-pressed="${done ? 'true' : 'false'}">${done ? '✓ Пройдено' : 'Позначити пройденим'}</button></div></div>${nav}${body}${nav}`;
+  }
+
   // Markdown for the lesson reader: headings, paragraphs, nested lists with task boxes, tables,
   // fenced code, block quotes, rules, and inline code, bold, italic and links. The text is escaped
   // before any tag is added, so a lesson can only ever produce these tags. Self-contained, so its
@@ -2846,7 +2916,7 @@
   }
 
   // ---------- nav + router
-  const NAV = [['dashboard', 'Dashboard', '⌂', 'Home'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['assistant', 'Assistant', '?', 'Ask'], ['stats', 'Team stats', '∑', 'Stats'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
+  const NAV = [['dashboard', 'Dashboard', '⌂', 'Home'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['assistant', 'Assistant', '?', 'Ask'], ['courses', 'Courses', '❏', 'Courses'], ['stats', 'Team stats', '∑', 'Stats'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
   const LEAD_ONLY = new Set(['stats']);
   const navHref = k => k === 'dashboard' ? '#/' : k === 'learning' && !canSeeHistory() && signedInAs() ? `#/people/${signedInAs()}/learning` : `#/${k}`;
   function navKey() {
@@ -2854,6 +2924,7 @@
     if (LEAD_ONLY.has(r.name) && !canSeeHistory()) return 'dashboard';
     if (!canSeeHistory() && r.name === 'people' && r.tab === 'learning' && r.id === signedInAs()) return 'learning';
     if (r.name === 'lesson') return 'learning';
+    if (r.name === 'read') return 'courses';
     return r.name;
   }
   function renderNav() {
@@ -2889,9 +2960,13 @@
     const ae = document.activeElement, caret = ae && ae.dataset && ae.dataset.cf === 'q' ? [ae.selectionStart, ae.selectionEnd] : null;
     const views = {
       dashboard: () => vDashboard(), projects: () => r.id ? vProject(r.id) : vProjects(), people: () => r.id ? vPerson(r.id) : vPeople(),
-      learning: () => vLearning(r.id), lesson: () => vLesson(r.id, r.tab), assistant: () => vAssistant(r.id), activity: () => vDashboard(), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
+      learning: () => vLearning(r.id), lesson: () => vLesson(r.id, r.tab), assistant: () => vAssistant(r.id), activity: () => vDashboard(),
+      courses: () => r.id ? vCourse(r.id) : vCourses(), read: () => vRead(r.id, r.tab), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
     };
-    const notice = S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
+    // a course reader with no connection is a visitor from outside: the courses alone, no tracker around them
+    const pub = isPublicRoute(r) && S.backend === 'static';
+    document.body.classList.toggle('public-view', pub);
+    const notice = pub ? '' : S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
     bind(v);
     if (r.name === 'ci' || (r.name === 'projects' && r.tab === 'ci')) startCiAuto(); else stopCiAuto();
@@ -2965,6 +3040,10 @@
         if (v && v.personId) return enroll(v.personId, { courseId: d.course }); return;
       }
       case 'edit-enroll': { if (!canSeeHistory() || !canSeeLearningOf(d.person)) return; const e = S.data[courseStore(d.course)].enrollments.find(x => x.personId === d.person && x.courseId === d.course); return enroll(d.person, e || { courseId: d.course }); }
+      case 'pub-done': {
+        setPubDone(d.key, !pubDone()[d.key]);
+        return render();
+      }
       case 'asst-clear': {
         S.asst.thread = [];
         try { localStorage.removeItem(ASK_KEY); } catch { /* nothing kept */ }
