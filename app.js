@@ -2955,6 +2955,7 @@
     // a course reader with no connection is a visitor from outside: the courses alone, no tracker around them
     const pub = isPublicRoute(r) && S.backend === 'static';
     document.body.classList.toggle('public-view', pub);
+    document.title = pub ? 'Zoho: курси онбордингу' : 'Team Tracker';
     const notice = pub ? '' : S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
     bind(v);
