@@ -208,10 +208,10 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
    тріалі (26.09.2026) редактор підписує оператор для picklist словом, як і для тексту — `is`, не
    символом `=`.
    **Що побачиш:** полотно з блоками **WHEN**, **FIELD SET**, **RULE 1**.
-3. **FIELD SET**: обери **Email**, **Phone**, **Annual Revenue**, **Company**. Документ тут
-   називає **Description**, але в тріалі (26.09.2026) багаторядкове поле **Description** взагалі
-   не пропонується у FIELD SET — пошук за цим словом у полі «Add Field» не дає жодного варіанта;
-   **Company** — робоча заміна.
+3. **FIELD SET**: обери **Email**, **Phone**, **Annual Revenue**, **Company**. Документ (редакція
+   27.09.2026) тут уже називає **Company**: багаторядкове поле **Description** у тріалі (26.09.2026)
+   не пропонується у FIELD SET узагалі — пошук за цим словом у полі «Add Field» не дає жодного
+   варіанта.
 4. **RULE 1** → **Based on Criteria** → **Country** is `United States` (друкуй точно так).
 5. **Who Should Review** → **Choose Reviewers** → користувач User B → додай.
 6. Для решти записів налаштуй **Others** → User C.
@@ -245,9 +245,9 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
 2. Умова: **Annual Revenue** — оператор `>` (у тріалі 26.09.2026 показаний символом, той самий
    набір `=, !=, <, <=, >, >=, between, not between, is empty, is not empty`, що й у approval
    criteria), значення `100000` (без коми).
-3. **FIELD SET**: **Annual Revenue**, **Email**, **Lead Source**, **Title**. Документ тут просить
-   **Country**, але композитне поле **Address - Country / Region** не пропонується у FIELD SET цього
-   тріалу (хоча воно ж чудово працює як критерій у RULE 1, нижче) — **Title** — робоча заміна.
+3. **FIELD SET**: **Annual Revenue**, **Email**, **Lead Source**, **Title**. Документ (редакція
+   27.09.2026) тут уже називає **Title**: композитне поле **Address - Country / Region** не
+   пропонується у FIELD SET цього тріалу (хоча воно ж чудово працює як критерій у RULE 1, нижче).
 4. **RULE 1**: **Based on Criteria** → **Lead Source** is `Cold Call` → рецензент User B.
 5. Додай друге правило: **Lead Source** is `Advertisement` → User C.
 6. **Others** → User A.
@@ -277,9 +277,9 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
 
 1. **Create New Process**: `RJ_Resubmission_Review`, Leads, Standard; умова **Lead Status** is `Not
    Contacted`.
-2. **FIELD SET**: **Email**, **Phone**, **Company** (документ бере Description, але в тріалі
-   26.09.2026 багаторядкове поле **Description** взагалі не пропонується у FIELD SET — пошук за цим
-   словом у полі «Add Field» не дає жодного варіанта; **Company** — робоча заміна, однорядкове поле).
+2. **FIELD SET**: **Email**, **Phone**, **Company** (документ, редакція 27.09.2026, тут уже називає
+   **Company**: багаторядкове поле **Description** у тріалі 26.09.2026 взагалі не пропонується у
+   FIELD SET — пошук за цим словом у полі «Add Field» не дає жодного варіанта).
 3. **RULE 1** → **All Records** → User A. **Others** тут не потрібен: All Records уже покриває все.
 4. **Actions**: три сповіщення ✔. Причини: дві нові. Збережи.
 5. Перевір порядок на сторінці списку: якщо процеси створювались саме в порядку
@@ -483,7 +483,7 @@ Steps | Expected Result | Actual Result | Status | Evidence**.
 | сценарій 5 потрапив у HV | `HV_Senior_Review` створено раніше за `WF_General_Screening` (список стоїть у порядку створення) — виправ через **Reorder Processes** |
 | у списку причин нема `Revenue Data Unverifiable` | рецензент працює в іншому процесі — причини в кожного процесу свої |
 | після відхилення в WF нема листа | так налаштовано: сповіщення на відхилення в WF вимкнене |
-| **Lead Source** не пропонується у **FIELD SET** | обмеження типів полів — зафіксуй як відхилення від документа |
+| **Description** чи **Country** не пропонується у **FIELD SET** | обмеження типів полів для FIELD SET у цьому тріалі — документ (редакція 27.09.2026) це вже враховує і використовує Company/Title |
 | у **Review History** нема імені рецензента | у тріалі ім'я підписане в кожному рядку — якщо його нема, це розбіжність із твоїм тріалом, а не норма; перевір Timeline і зафіксуй різницю |
 | процес не видаляється | у ньому є записи на рев'ю |
 | адміністратор бачить запис, призначений User B | для адміністратора це нормально |
@@ -522,22 +522,24 @@ Processes** відкривається. Перевір, чи нема на Leads
 ліди, і на якому лейауті створюватимеш процеси.
 
 **16.3.** Налаштуй процес `WF_General_Screening` для Leads, лейаут Standard: умова входу **Lead
-Source** is `Web Download`; поля на рев'ю Email, Phone, Annual Revenue, Company (документ бере
-Description, але воно не пропонується у FIELD SET цього тріалу); Rule 1 —
+Source** is `Web Download`; поля на рев'ю Email, Phone, Annual Revenue, Company (документ, редакція
+27.09.2026, тут уже називає Company: Description не пропонується у FIELD SET цього тріалу); Rule 1 —
 **Country** is `United States` → рецензент User B; Others — усі інші → User C; дії — сповіщення на
 подачу і на завершення рев'ю; причини — три стандартні плюс `Missing Contact Details`. Збережи й
 зроби скриншот.
 
 **16.4.** Налаштуй процес `HV_Senior_Review` для Leads, лейаут Standard: умова **Annual Revenue**
-більше `100000`; поля Annual Revenue, Email, Lead Source, Title (документ бере Country, але
-композитне поле не пропонується у FIELD SET цього тріалу); Rule 1 — **Lead Source** is
+більше `100000`; поля Annual Revenue, Email, Lead Source, Title (документ, редакція 27.09.2026, тут
+уже називає Title: композитне поле Address - Country / Region не пропонується у FIELD SET цього
+тріалу); Rule 1 — **Lead Source** is
 `Cold Call` → User B; Rule 2 — **Lead Source** is `Advertisement` → User C; Others → User A
 (адміністратор); дії — сповіщення на подачу і на відхилення, SLA escalation 2 дні з ескалацією до
 User A; причини — стандартні плюс `Revenue Data Unverifiable`. Збережи й зроби скриншот.
 
 **16.5.** Налаштуй процес `RJ_Resubmission_Review` для Leads, лейаут Standard: умова **Lead Status**
-is `Not Contacted`; поля Email, Phone, Company (Description документ просить, але поле не
-пропонується у FIELD SET цього тріалу); Rule 1 — **All Records** → User A; дії — усі три сповіщення;
+is `Not Contacted`; поля Email, Phone, Company (документ, редакція 27.09.2026, тут уже називає
+Company: Description не пропонується у FIELD SET цього тріалу); Rule 1 — **All Records** → User A;
+дії — усі три сповіщення;
 причини — додати `Previously Rejected — No Change Detected` і `Incomplete Resubmission`. Відкрий
 **Reorder Processes** і переконайся, що список уже стоїть у порядку `WF_General_Screening` →
 `HV_Senior_Review` → `RJ_Resubmission_Review` (порядок створення, змінювати нічого не треба). Зроби
@@ -721,8 +723,8 @@ Leads** ліда нема.
   плюс додаткові кейси RV-6…RV-12, які ти виконав;
 - Sheet, `A18 Test Cases`: **TC ID | Scenario | Preconditions | Test Data | Steps | Expected Result
   | Actual Result | Status | Evidence**, по рядку на кейс;
-- Writer, `A18 Defect Report` — якщо є FAIL (наприклад, поле, яке документ просить додати в FIELD
-  SET, не пропонується в живому пошуку **Add Field**, як сталося з **Description** й **Country**);
+- Writer, `A18 Defect Report` — якщо є FAIL (наприклад, поле очікуваного за довідкою типу не
+  пропонується в живому пошуку **Add Field**, хоча за списком типів мало б підійти);
 - скриншоти: три конфігурації процесів і список після **Reorder Processes**; черга **Workqueue → My
   Jobs → Review Process** із записами, що чекають; сторінка погодженого `RV1-Approve` і
   відхиленого `RV2-RejectRevenue`; екран **Review History**;

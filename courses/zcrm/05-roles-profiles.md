@@ -322,8 +322,7 @@ Permissions** → **Leads**. Має бути `Private`. Якщо стоїть і
 перевірок).
 
 У тріалі (26.09.2026) поле **Profile Name** не приймає круглі дужки: `Junior Sales (Restricted)`
-дає помилку `Profile Name should not contain the following special character(s): ( )`. Тому назва
-без дужок — не спрощення документа, а вимога продукту.
+дає помилку `Profile Name should not contain the following special character(s): ( )`. Документ (редакція 27.09.2026) також називає профіль без дужок — `Junior Sales Restricted`.
 
 Перш ніж знімати дозволи, подумай, що цьому профілю знадобиться далі. Користувач з обмеженим
 профілем ще працюватиме з угодами (**Deals**) і продуктами (**Products**). Якщо зараз забрати ці

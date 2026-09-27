@@ -59,7 +59,7 @@ Kiosk 2 використовує Predefined Configuration: кожне потрі
 | Email | Email Address (Basic_Registration) | так само | так само |
 | Phone | Phone Number (Basic_Registration) | так само | так само |
 | Lead Source | статичне `Web Download` | статичне `Cold Call` | статичне `Web Research` |
-| Description | Additional Notes (Technology_Screening) | Additional Notes (Finance_Screening) | Additional Notes (General_Intake) |
+| Description | Additional Notes (Technology_Screening) | Finance Additional Notes (Finance_Screening) | General Additional Notes (General_Intake) |
 | лист | User B | User C | не надсилається |
 
 Статичне значення для picklist має існувати в полі CRM. У тріалі в Lead Source немає `Other`, тому
@@ -143,10 +143,9 @@ completion, повертаючись до **вже створеної** дії (
 
 - **Назва компонента.** У тріалі (27.09.2026), шляхом **Customized Home Page** (крок вище), окремого
    поля для назви компонента немає: тайл на сторінці завжди показує власну назву кіоска
-   (`CAND IntakeRouter`), а подвійний клік по заголовку його не робить редагованим. Завдання нижче все
-   одно просить назвати компонент `New Candidate Registration` — це саме тому, що варто перевірити
-   особисто: якщо на твоєму шляху поля для назви немає, запиши це як відхилення, а не як пропущений
-   крок.
+   (`CAND IntakeRouter`), а подвійний клік по заголовку його не робить редагованим. Документ (редакція
+   27.09.2026) це вже враховує й не просить називати компонент окремо — тож і в тебе такого поля не
+   буде.
 - **Хто бачить.** User's Home Page — особиста, її бачиш тільки ти. Щоб кіоск бачили User B і User C,
    потрібна Customized Home Page, відкрита їхнім ролям або профілям.
 
@@ -160,7 +159,7 @@ completion, повертаючись до **вже створеної** дії (
 
 | параметр | значення |
 |---|---|
-| Kiosk Name | `CAND_IntakeRouter` |
+| Kiosk Name | `CAND IntakeRouter` (Unified API Name `CAND_IntakeRouter`) |
 | Description | `Multi-screen candidate registration and routing kiosk. Branches by job category and creates a Lead record upon submission.` |
 | Access Location | компонент CRM Home Page |
 
@@ -169,9 +168,10 @@ completion, повертаючись до **вже створеної** дії (
 Run** як основним способом перевірки: кожен прохід створює лід і надсилає лист.
 
 **Крок 1. Створи кіоск.** **Setup → Customization → Kiosk Studio** → **Create Kiosk** (або **Get
-Started**, якщо кіосків ще немає). Kiosk Name `CAND_IntakeRouter`, **Unified API Name** (обов'язкове;
-наприклад `CAND_IntakeRouter`), Description як вище → **Next**. Модуль задавати не потрібно: кіоск
-відкриватимуть з Home page, де поточного запису немає.
+Started**, якщо кіосків ще немає). Kiosk Name `CAND IntakeRouter` (без підкреслення — те саме
+обмеження, що й у Kiosk 1), **Unified API Name** (обов'язкове; наприклад `CAND_IntakeRouter`),
+Description як вище → **Next**. Модуль задавати не потрібно: кіоск відкриватимуть з Home page, де
+поточного запису немає.
 
 **Крок 2. Екран Basic_Registration.** **+** → **Screen** → **Add**, назва `Basic_Registration`.
 Елементи в такому порядку:

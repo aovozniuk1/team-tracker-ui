@@ -279,7 +279,7 @@ Template, щоб сповістити потрібних людей. Тест: �
 |---|---|
 | умова | **Severity** · рівність · `Critical` |
 | **Target Action** | **Close Before** |
-| **Target Field** | час створення issue, якщо він є у списку (у Standard layout поле зветься `Created Time`); запиши, що обрав |
+| **Target Field** | `Due Date` — єдиний варіант у списку (перевірено 26.09.2026; ні `Created Time`, ні інших стандартних полів там нема) |
 | **Target Time** | `2`, одиниця — дні |
 | годинник | **Business hours** |
 
@@ -334,9 +334,9 @@ Assignee; **Level 2** — у день строку, сповіщає власн�
 ескалює крок за кроком — спершу на Assignee, потім на керівництво, якщо issue досі не закрито. Здати
 те саме: сценарії, чек-лист, відео, розділ звіту.
 
-«Due date» у цьому завданні — **ціль SLA**, а не поле **Due Date** issue. Щоб це довести, у тесті
-можна поставити Due Date далеко в майбутнє: ціль SLA від нього не залежить, якщо Target Field —
-час створення.
+«Due date» у цьому завданні означає **ціль SLA**: Target Field у тріалі завжди — поле **Due Date**
+issue (єдиний варіант; «Created Time» серед стандартних полів нема), тож ціль напряму залежить від
+Due Date issue — постав його заздалегідь, інакше рахувати ціль нема від чого.
 
 ### Крок 0. Підготовка
 
@@ -356,7 +356,7 @@ Assignee; **Level 2** — у день строку, сповіщає власн�
 | Create | **Execute On** | `Creation or Updation` |
 | Add targets | умова | **Severity** · рівність · `Show stopper` |
 | Add targets | **Target Action** | **Close Before** |
-| Add targets | **Target Field** | те саме поле часу створення, що й у `Critical Bug SLA` |
+| Add targets | **Target Field** | `Due Date`, як і в `Critical Bug SLA` |
 | Add targets | **Target Time** | `3`, одиниця — дні |
 | Add targets | годинник | **Business hours** |
 | Escalate | Level 1: **Escalate on** | 1 день **до** цілі (варіант на кшталт **Before**; одиниця — дні, якщо є) |
@@ -511,7 +511,8 @@ Notes/Attachments. Сценарії для здачі пишуться англ�
    4. After the escalation time, check User C's mailbox, the project Feed, the Escalated Issues
       view and the escalation mark in the list.
 - Expected Result:
-   1. The SLA is applied on creation; the target = creation time + 2 business days.
+   1. The SLA is applied on creation; the target = the issue's Due Date + 2 business days (Target
+      Field offers only Due Date).
    2. Nothing is escalated before the target.
    3. After the target: User C receives an email with subject `[SLA breach] <key> <title>`;
       the escalation appears in Feed; the issue is listed in Escalated Issues.
@@ -821,7 +822,7 @@ issues цього проєкту; у даних проєкту Owner — ти; �
 | Create | **Execute On** | `Creation or Updation` |
 | Add targets | умова | Severity · рівність · `Critical` |
 | Add targets | **Target Action** | **Close Before** |
-| Add targets | **Target Field** | час створення issue (записано, як він зветься в списку) |
+| Add targets | **Target Field** | `Due Date` — єдиний варіант |
 | Add targets | **Target Time** | 2 дні |
 | Add targets | годинник | **Business hours** |
 | Escalate | **Escalate on** | у момент цілі (**On Time** або нульовий зсув) або найменший зсув після неї |
@@ -834,7 +835,7 @@ SLA активна, у списку проєкту, вище за неї нем�
 
 | issue | SLA | що має статися |
 |---|---|---|
-| `SLA3-01`, `Critical` | `Critical Bug SLA` | ціль = створення + 2 робочі дні; після цілі — лист User C, **Feed**, **Escalated Issues** |
+| `SLA3-01`, `Critical` | `Critical Bug SLA` | ціль = Due Date issue + 2 робочі дні; після цілі — лист User C, **Feed**, **Escalated Issues** |
 | `SLA3-02`, `Major` | немає | ні позначки, ні листів |
 | `SLA3-03`, `Critical`, закритий до цілі | `Critical Bug SLA` | ескалацій немає |
 | `SLA3-F1`, `Critical`, Module `SLA Fast` | швидка | через ~1 год — лист User B (Level 1), через ~3 год — лист User C (Level 2) |
@@ -852,7 +853,7 @@ SLA активна, у списку проєкту, вище за неї нем�
 | Create | **Execute On** | `Creation or Updation` |
 | Add targets | умова | Severity · рівність · `Show stopper` |
 | Add targets | **Target Action** | **Close Before** |
-| Add targets | **Target Field** | той самий час створення issue |
+| Add targets | **Target Field** | `Due Date`, той самий що й вище |
 | Add targets | **Target Time** | 3 дні |
 | Add targets | годинник | **Business hours** |
 | Escalate | Level 1 | 1 день до цілі → **Assignee** → `SLA Show stopper – L1` |
@@ -871,7 +872,7 @@ SLA активна, у списку проєкту, вище за неї нем�
 
 **12.10.** Приклад набору:
 
-1. New Critical issue gets "Critical Bug SLA"; target = creation + 2 business days.
+1. New Critical issue gets "Critical Bug SLA"; target = the issue's Due Date + 2 business days.
 2. New Major issue gets no SLA.
 3. Critical issue in another project gets no SLA.
 4. Critical issue created on Friday afternoon: target skips the weekend.

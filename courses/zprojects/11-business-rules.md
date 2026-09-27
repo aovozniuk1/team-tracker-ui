@@ -312,8 +312,9 @@ Business rule**.
 | значення | `Client Escalation` |
 | **Execute the next business rule** | не відмічай (правило поки одне) |
 
-Якщо **Tags** серед полів критерію немає, документ дозволяє взяти «similar custom field/flag». Тоді
-створи власне поле: **Setup → Customization → Layouts → Issues** → layout свого проєкту →
+Новий тег через форму issue не створюється в тріалі (підтверджений продуктовий баг) — критерій
+`Tags` лишиться без значення, доки такого тега не існує. Онови критерій на «similar custom
+field/flag»: створи власне поле: **Setup → Customization → Layouts → Issues** → layout свого проєкту →
 перетягни з **New Fields** поле типу Checkbox, назви його `Client Escalation` → **Add to Layout** →
 **Save Layout**. Критерій стане «`Client Escalation` відмічено». Власні поля issue — функція плану
 Enterprise. Заміну обов'язково запиши у звіт.

@@ -252,7 +252,7 @@ Zoho час від часу перейменовує пункти.
 
 | параметр | значення |
 |---|---|
-| Kiosk Name | `LC_QuickUpdate` |
+| Kiosk Name | `LC QuickUpdate` (Unified API Name `LC_QuickUpdate`) |
 | Description | `Post-call status update and note entry for recruiter use.` |
 | Access Location | Custom Button на Lead Record Detail View |
 
