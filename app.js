@@ -522,6 +522,38 @@
   };
   const firstInline = r => ((r && r.reports) || []).findIndex(hasInline);
   const newestInline = (s, gid) => runsOfGroup(s, gid).find(r => isFinished(r) && firstInline(r) >= 0) || null;
+  // A report's own file: from its public site, or through GitHub (the lead's server locally) when the
+  // tracker keeps it.
+  const reportFileName = rep => {
+    const inl = rep.inline || {};
+    let n = '';
+    try { n = inl.type === 'repo' ? inl.path.split('/').slice(-2).join('-') : decodeURIComponent(new URL(inl.src).pathname.split('/').pop()); } catch { /* fall back below */ }
+    return /\.html?$/i.test(n) ? n : `${(rep.name || 'report').replace(/[^\w.-]+/g, '-')}.html`;
+  };
+  function fetchReport(inl, signal) {
+    if (inl.type === 'url') return fetch(inl.src, { cache: 'no-store', signal });
+    if (S.backend === 'server') return fetch(`/api/report?ref=${encodeURIComponent(inl.ref)}&path=${encodeURIComponent(inl.path)}`, { cache: 'no-store', signal });
+    const g = ghConfig(), path = inl.path.split('/').map(encodeURIComponent).join('/');
+    return fetch(`https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(g.repo)}/contents/${path}?ref=${encodeURIComponent(inl.ref)}`, {
+      headers: { Authorization: `Bearer ${g.token}`, Accept: 'application/vnd.github.raw', 'X-GitHub-Api-Version': '2022-11-28' }, signal });
+  }
+  function saveFile(href, name) { const a = document.createElement('a'); a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+  async function saveReport(rep) {
+    const r = await fetchReport(rep.inline);
+    if (!r.ok) throw new Error(`answered ${r.status}`);
+    const u = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: 'text/html;charset=utf-8' }));
+    saveFile(u, reportFileName(rep)); setTimeout(() => URL.revokeObjectURL(u), 60000);
+  }
+  async function downloadReportFor(pid, runId, idx) {
+    const s = ciSource(pid); if (!s) return;
+    const r = runId ? runsOf(s).find(x => String(x.id) === runId) : null;
+    const rep = runId && !r ? null : ((r ? r.reports : s.reports) || [])[Number(idx)];
+    if (!rep || !hasInline(rep)) { toast('That report is no longer in the snapshot'); return; }
+    if (rep.inline.type === 'repo' && S.backend !== 'server' && !ghConfig().token) { toast('This report is kept in the tracker repository on GitHub. Connect this page to GitHub (Data → Connect to GitHub) to download it.'); return; }
+    toast(`Downloading ${reportFileName(rep)}…`);
+    try { await saveReport(rep); } catch (e) { toast(`The report could not be downloaded: ${e.message || 'network error'}.`); }
+  }
+  const dlBtn = (pid, runId, rep, idx) => `<button type="button" class="rep-ext rep-dl" data-act="report-dl" data-project="${esc(pid)}" data-run="${esc(runId)}" data-idx="${idx}" title="Download ${esc(reportFileName(rep))}" aria-label="Download ${esc(rep.name || 'the report')}">⤓</button>`;
   const extLink = rep => `<a class="rep-ext" href="${esc(rep.url)}" target="_blank" rel="noopener" title="Open in a new tab" aria-label="Open ${esc(rep.name || 'the report')} in a new tab">↗</a>`;
   function reportBtn(pid, runId, rep, idx, html, cls = 'btn sm primary') {
     const name = rep.name || 'the report', size = fmtBytes(rep.inline && rep.inline.bytes);
@@ -531,7 +563,7 @@
   function reportLinks(pid, runId, list, text) {
     list = list || [];
     return list.map((rep, i) => hasInline(rep)
-      ? `<span class="rep">${reportBtn(pid, runId, rep, i, esc(list.length > 1 || !text ? rep.name || 'Report' : text))}${extLink(rep)}</span>`
+      ? `<span class="rep">${reportBtn(pid, runId, rep, i, esc(list.length > 1 || !text ? rep.name || 'Report' : text))}${dlBtn(pid, runId, rep, i)}${extLink(rep)}</span>`
       : link(rep.url, rep.name)).join(' ');
   }
 
@@ -858,23 +890,9 @@
     document.addEventListener('keydown', onKey);
     $('[data-x]', bg).addEventListener('click', close);
     bg.addEventListener('click', e => { if (e.target === bg) close(); });
-    // The saved file is the report itself: the page already holds it after fetching it from GitHub,
-    // and a public report site answers a plain fetch.
-    const fileName = () => {
-      let n = '';
-      try { n = inl.type === 'repo' ? inl.path.split('/').slice(-2).join('-') : decodeURIComponent(new URL(inl.src).pathname.split('/').pop()); } catch { /* fall back below */ }
-      return /\.html?$/i.test(n) ? n : `${name.replace(/[^\w.-]+/g, '-')}.html`;
-    };
-    const saveAs = href => { const a = document.createElement('a'); a.href = href; a.download = fileName(); document.body.appendChild(a); a.click(); a.remove(); };
     $('[data-dl]', bg).addEventListener('click', async () => {
-      if (blobUrl) { saveAs(blobUrl); return; }
-      if (inl.type !== 'url') { toast('The report is still being fetched; download it once it shows.'); return; }
-      try {
-        const r = await fetch(inl.src, { cache: 'no-store' });
-        if (!r.ok) throw new Error(String(r.status));
-        const u = URL.createObjectURL(await r.blob());
-        saveAs(u); setTimeout(() => URL.revokeObjectURL(u), 60000);
-      } catch { toast(`The report could not be downloaded here; use “${where}” and save it from there.`); }
+      if (blobUrl) { saveFile(blobUrl, reportFileName(rep)); return; }
+      try { await saveReport(rep); } catch { toast(`The report could not be downloaded here; use “${where}” and save it from there.`); }
     });
 
     const mount = (src, sandbox) => {
@@ -1820,7 +1838,8 @@
     const stray = pending.filter(k => !reviewKeys(p).includes(k));
     const strays = stray.length ? `<div class="card" style="margin-bottom:14px"><h3>Suggestions for fields the weekly review does not write</h3>${stray.map(k => suggestBox(p, k)).join('')}</div>` : '';
     const listCard = (key, title, empty, last) => `<div class="card"${last ? '' : ' style="margin-bottom:14px"'}><h3>${esc(title)}${editedNote(p, key)}</h3>${listOr(p[key], empty)}${suggestBox(p, key)}</div>`;
-    if (tab === 'ci') return head + tabs + (src ? latestReports(p, src) : '') + waitsBox(id) + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
+    const why = canSeeHistory() && src && src.reportsNote ? `<div class="hint" style="margin:-6px 0 14px">No report came from Bitbucket for run ${esc(src.reportsNote)}</div>` : '';
+    if (tab === 'ci') return head + tabs + (src ? latestReports(p, src) : '') + why + waitsBox(id) + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
     if (tab === 'tests') return head + tabs + vProjectTests(p);
     return head + tabs + `${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}${health}${strays}
       <div class="grid cols-2">
@@ -3051,6 +3070,7 @@
       case 'who': return chooseViewer();
       case 'run-ci': return runCI(d.project, d.group);
       case 'report': return openReportFor(d.project, d.run || '', d.idx);
+      case 'report-dl': return downloadReportFor(d.project, d.run || '', d.idx);
       case 'wait-dismiss': return dismissWait(d.id);
       case 'cat-clear': { S.catFilter[d.project] = { q: '', kind: '', area: '' }; render(); const q = $('[data-cf="q"]'); if (q) q.focus(); return; }
       case 'refresh-ci': return refreshCI(b);
