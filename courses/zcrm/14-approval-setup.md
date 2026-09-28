@@ -23,7 +23,7 @@ Approval process — правило, яке автоматично **блоку�
 ```
 
 Поки запис чекає, його не можна конвертувати, видалити чи вільно редагувати — у цьому весь сенс.
-У тріалі (26.09.2026) банер запису показує не слово «Waiting for Approval», а лічильник: **«Waiting
+Банер запису показує не слово «Waiting for Approval», а лічильник: **«Waiting
 for your response: 0/N»** (N — кількість етапів) поруч зі значком замка; кнопки конвертації й
 видалення вимкнені, а погоджувач отримує лист і може відповісти прямо з картки
 (**Respond**: approve, delegate, reject).
@@ -59,7 +59,7 @@ Automation**; для team modules процеси можуть створюват
 | механізм | що робить | головна відмінність від погодження |
 |---|---|---|
 | Workflow rule | реагує на подію дією | нічого не блокує й рішення людини не чекає |
-| Blueprint | веде процес над одним полем: переходи, власники переходів, обов'язкові дані | керує рухом по станах; запис одночасно веде лише один Blueprint (у тріалі перевіряли) |
+| Blueprint | веде процес над одним полем: переходи, власники переходів, обов'язкові дані | керує рухом по станах; запис одночасно веде лише один Blueprint |
 | Review process | перевіряє записи на вході в CRM, поле за полем, до того як їх побачать процеси | працює з окремими полями й per layout; має SLA і звіти; делегувати не можна |
 | Approval process | блокує весь запис до рішення | рішення «все або нічого» на весь запис; можна делегувати; до 10 етапів у правилі |
 
@@ -97,8 +97,7 @@ Approval process: назва, модуль, Send for Approval on
 
 ### Вікно Create Approval Process
 
-**Setup → Process Management → Approval Processes** → **Create Approval Process**. Вікно має поля
-(перевірено в тріалі):
+**Setup → Process Management → Approval Processes** → **Create Approval Process**. Вікно має поля:
 
 | поле | що це |
 |---|---|
@@ -116,8 +115,8 @@ Approval process: назва, модуль, Send for Approval on
 
 Критерій правила: які записи йдуть на погодження. Для числових і валютних полів оператори показані
 символами: `=`, `!=`, `<`, `<=`, `>`, `>=`, `between`, `not between`, `is empty`, `is not empty`, а
-біля значення — валюта організації (у тріалі це `UAH`). Для picklist і текстових полів у тріалі
-(26.09.2026) оператори показані саме словами — `is`, `isn't`, `contains`, `doesn't contain`,
+біля значення — валюта організації (у тріалі це `UAH`). Для picklist і текстових полів оператори
+показані саме словами — `is`, `isn't`, `contains`, `doesn't contain`,
 `starts with`, `ends with`, `is empty`, `is not empty` — так само, як у workflow rules. Кілька рядків
 критерію об'єднуються шаблоном, як у workflow rules.
 
@@ -138,7 +137,7 @@ Approval process: назва, модуль, Send for Approval on
 | **Record Owner** | сам власник запису |
 | **User Lookup Field** | користувач із поля-lookup запису (за довідкою — у ранньому доступі) |
 
-Картка етапу (перевірено в тріалі): назва етапу, погоджувач, **Assign Task for Approvers** (задача
+Картка етапу: назва етапу, погоджувач, **Assign Task for Approvers** (задача
 погоджувачу, коли запис надходить), **Action on Approval: Update fields** (оновлення поля саме на
 погодженні цього етапу) і **Record Modification Settings**:
 - [ ] **Allow approvers to edit pending approval records** — **All Fields** або **Selected Fields**
@@ -159,8 +158,8 @@ Approval process: назва, модуль, Send for Approval on
 
 Коли етапів два й більше, під ними з'являється **Overall approval flow**:
 
-У тріалі (26.09.2026) вибір носить точну назву **"Approve a Record when"**, і в кожному варіанті
-продукт додає уточнення в дужках:
+Вибір носить точну назву **"Approve a Record when"**, і в кожному варіанті продукт додає уточнення в
+дужках:
 
 | вибір | коли правило завершується погодженням |
 |---|---|
@@ -170,16 +169,15 @@ Approval process: назва, модуль, Send for Approval on
 
 За довідкою, коли обираєш загальний порядок, іноді з'являється вікно про Record Modification
 Settings: перенести налаштування етапу на рівень усього правила (**Move to Overall Record
-Modification Settings Level**) чи скинути (**Discard**). У тріалі (26.09.2026), на правилі з
-типовими налаштуваннями обох етапів, це вікно **не з'явилось** — перехід на Sequential відбувся без
-запиту. Натомість під етапами з'явився блок **«By default a rejection should: Reject only the
-current stage»** (випадаючий список) і прапорець **«Notify all previous approvers»** (обидва — за
-замовчуванням, не чіпали); довідка також описує варіанти відхилити всі попередні етапи або дати
-погоджувачу обрати етап — у тріалі перевірявся лише типовий варіант.
+Modification Settings Level**) чи скинути (**Discard**). На правилі з типовими налаштуваннями обох
+етапів це вікно не з'являється — перехід на Sequential відбувається без запиту. Натомість під етапами
+з'являється блок **«By default a rejection should: Reject only the current stage»** (випадаючий
+список) і прапорець **«Notify all previous approvers»** (обидва — за замовчуванням); довідка також
+описує варіанти відхилити всі попередні етапи або дати погоджувачу обрати етап.
 
 ### Final Actions
 
-| блок | дії (перевірено в тріалі) | коли виконуються |
+| блок | дії | коли виконуються |
 |---|---|---|
 | **Action on Final Approval** | Assign Task, Update fields, Email Notifications, Webhooks, Functions | після остаточного погодження правила |
 | **Action on Rejection** | Update fields, Email Notifications, Webhooks, Functions | після відхилення |
@@ -199,7 +197,7 @@ Sequential із двох етапів — буде.
 
 ### Assign Admins і Takeover
 
-**Assign Admins** (угорі праворуч) → **Rule Admin Settings** (перевірено в тріалі):
+**Assign Admins** (угорі праворуч) → **Rule Admin Settings**:
 - **Rule Admins** — хто може діяти замість погоджувачів у цьому правилі (лише користувачі, до 15);
 - **Allow rule admins to edit pending approval records** — чи можуть rule admins редагувати запис,
   що чекає (за довідкою — усі поля або ті, що задані в Record Modification Settings);
@@ -261,7 +259,8 @@ Sequential із двох етапів — буде.
 - У Contacts є поле **Mailing Address - Country / Region** (у тріалі є).
 
 **3.3. Доступ до погоджень.** **Setup** (шестерня вгорі праворуч) **→ Process Management → Approval
-Processes** відкривається. Якщо розділу нема — зупинись і напиши ментору.
+Processes** відкривається. Якщо розділу нема — перевір, чи твоя редакція й профіль його
+підтримують.
 
 **Ще дві речі перед стартом:**
 - подивись список процесів: якщо для Deals, Leads чи Contacts уже є процеси з твоїх експериментів,
@@ -336,8 +335,8 @@ Processes** відкривається. Якщо розділу нема — з�
    Administrator`). Zoho не дозволяє призначити **того самого** користувача погоджувачем двох різних
    етапів одного правила: якщо User B і адміністратор — один і той самий обліковий запис, продукт
    покаже помилку «The selected approver is already assigned to Stage 1. Please choose a different
-   approver.» (перевірено в тріалі 26.09.2026) — для другого етапу знадобиться справді інший
-   користувач; типом **Record Owner** замість **User** можна обійти цю перевірку технічно (він
+   approver.» — для другого етапу знадобиться справді інший користувач; типом **Record Owner**
+   замість **User** можна обійти цю перевірку технічно (він
    резолвиться в того самого власника запису), але це не доводить погодження різними людьми.
    **Очікування (довідка):** під етапами з'являється **Overall approval flow**.
 5. **Overall approval flow**: **All stages are approved**, потім **Sequential**. Так User B погоджує
@@ -413,8 +412,8 @@ Download` і потім змінений на `Cold Call`, погодження 
 *будь-який* лід із `Cold Call` має пройти його до конвертації. Тест: створи лід з іншим джерелом,
 зміни на `Cold Call`, спробуй конвертувати.
 
-**4. Порожнє значення (C).** У тріалі (26.09.2026) значення для **Mailing Address - Country / Region**
-обирають зі списку країн (пошуковий picker, а не вільний текст) — увести `USA`, `US` чи `united
+**4. Порожнє значення (C).** Значення для **Mailing Address - Country / Region** обирають зі списку
+країн (пошуковий picker, а не вільний текст) — увести `USA`, `US` чи `united
 states` вручну через інтерфейс не вийде, тож типова помилка з варіантами написання країни в UI не
 трапляється. Лишається дослідницький випадок: контакт із **порожнім** значенням поля — чи піде він
 на погодження за критерієм «isn't United States»; результат — у звіт. Якщо запис приходить в обхід
@@ -561,7 +560,8 @@ CRM: User B (погоджувач) і User C (власник записів).*
   і профіль, обидва активні й підтверджені;
 - Leads, Contacts і Deals видно в навігації; у Deals є **Amount**; у **Lead Source** є `Cold Call`;
   у Contacts є **Mailing Address - Country / Region**;
-- **Setup → Process Management → Approval Processes** доступний (якщо ні — напиши ментору).
+- **Setup → Process Management → Approval Processes** доступний (якщо ні — перевір редакцію і
+  профіль).
 
 **14.6.** *(A17, сценарій A)* Налаштуй процес: **Module** `Deals`, **Approval Process Name**
 `High-Value Deal Review`, **Description** `Requires approval for any deal with an amount exceeding

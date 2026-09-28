@@ -59,10 +59,11 @@ Review Process (модуль + лейаут)
 
 **Поля для рев'ю.** За новішою статтею довідки можна обрати однорядковий і багаторядковий текст,
 Email, Phone, дату й дату-час, число, валюту, десяткове, відсоток, довге ціле, URL, picklist,
-multi-select, checkbox і file upload; старіший FAQ Zoho перелічує лише перший набір. У тріалі
-(26.09.2026) підтверджено, що **Lead Source** (picklist) у **FIELD SET** для Leads/Standard
+multi-select, checkbox і file upload; старіший FAQ Zoho перелічує лише перший набір.
+
+**Lead Source** (picklist) у **FIELD SET** для Leads/Standard
 **є** — довідка тут не помиляється. Але два типи полів, які теж мали б підходити за списком,
-живого підтвердження не отримали: багаторядковий **Description** узагалі не пропонується (пошук за
+у FIELD SET не пропонуються: багаторядковий **Description** узагалі не пропонується (пошук за
 цим словом у полі «Add Field» не дає жодного варіанта), так само не пропонується композитне поле
 адреси (**Address - Country / Region**) — хоча воно ж є звичайним однорядковим текстовим полем як
 критерій у RULE. Плануючи FIELD SET, перевіряй кожне поле в живому пошуку «Add Field», а не лише за
@@ -83,12 +84,12 @@ users, roles, groups або record owner, до 5 на правило. Досит
 Можна додати свої, всього до 10. Відхиляючи поле, рецензент обирає причину зі списку свого
 процесу.
 
-**Кілька процесів — черговість.** У тріалі (26.09.2026) список за замовчуванням стоїть у порядку
+**Кілька процесів — черговість.** Список за замовчуванням стоїть у порядку
 **створення, найстаріший угорі** — так само, як і в approval-процесів (жодного контрасту між ними
 немає, обидва типи процесів поводяться однаково). Якщо запис підходить під кілька процесів, він іде
 за порядком у списку. Порядок змінює **Reorder Processes** (відкривається, показує підказку
 «Reordering infers the order of execution»); якщо процеси вже створені в потрібному порядку,
-перетягувати нема чого — це підтверджено на трьох процесах A18 нижче.
+перетягувати нема чого.
 
 **Статуси запису на рев'ю:** `Pending for Review`, `Review in Progress`, `Rejected`,
 `Pending for Re-review`. Ще є `Unreviewed` — так позначається запис, який при деактивації процесу
@@ -154,11 +155,11 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
   → **Who Should Review** («Choose Reviewers»).
 - Черга рецензента: **Workqueue → My Jobs → Review Process**.
 
-> У тріалі перевірено все вікно створення й усе полотно: **WHEN**, **FIELD SET**,
+> Вікно створення проходить усе полотно: **WHEN**, **FIELD SET**,
 > **RULE 1** (Based on Criteria / All Records), **Who Should Review**, **OTHERS**, **ACTIONS**
 > (Notifications, SLA Escalation, Functions), **Configure Reasons For Record Rejection**,
-> збереження і **Reorder Processes**. Перевірена й сама дія рецензента над окремими полями (27.09.2026)
-> — вона не ховається за жодною кнопкою «Respond»: кожне поле з FIELD SET показує власну маленьку
+> збереження і **Reorder Processes**. Дія рецензента над окремими полями
+> не ховається за жодною кнопкою «Respond»: кожне поле з FIELD SET показує власну маленьку
 > іконку одразу біля свого значення (і в короткій картці зверху, і в розділі **Lead Information**
 > нижче — та сама іконка скрізь, де поле показане). Клік по ній відкриває невелике вікно **"Do you
 > want to approve the field '⟨поле⟩' with value '⟨значення⟩'?"** (без частини «with value…», якщо
@@ -204,14 +205,12 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
 1. **Create New Process** → заповни **Process Name**, **Description** (наприклад, `Screening of web
    form applicants for data completeness`), **Choose Module** `Leads`, **Choose Layout**
    `Standard`.
-2. **Choose a condition to initiate the rule**: **Lead Source** is `Web Download` → **Next**. У
-   тріалі (26.09.2026) редактор підписує оператор для picklist словом, як і для тексту — `is`, не
-   символом `=`.
+2. **Choose a condition to initiate the rule**: **Lead Source** is `Web Download` → **Next**.
+   Редактор підписує оператор для picklist словом, як і для тексту — `is`, не символом `=`.
    **Що побачиш:** полотно з блоками **WHEN**, **FIELD SET**, **RULE 1**.
-3. **FIELD SET**: обери **Email**, **Phone**, **Annual Revenue**, **Company**. Документ (редакція
-   27.09.2026) тут уже називає **Company**: багаторядкове поле **Description** у тріалі (26.09.2026)
-   не пропонується у FIELD SET узагалі — пошук за цим словом у полі «Add Field» не дає жодного
-   варіанта.
+3. **FIELD SET**: обери **Email**, **Phone**, **Annual Revenue**, **Company**. Багаторядкове поле
+   **Description** у FIELD SET не пропонується узагалі — пошук за цим словом у полі «Add Field» не
+   дає жодного варіанта.
 4. **RULE 1** → **Based on Criteria** → **Country** is `United States` (друкуй точно так).
 5. **Who Should Review** → **Choose Reviewers** → користувач User B → додай.
 6. Для решти записів налаштуй **Others** → User C.
@@ -242,12 +241,12 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
 | причини відхилення | стандартні + `Revenue Data Unverifiable` |
 
 1. **Create New Process**: `HV_Senior_Review`, Leads, Standard.
-2. Умова: **Annual Revenue** — оператор `>` (у тріалі 26.09.2026 показаний символом, той самий
+2. Умова: **Annual Revenue** — оператор `>` (показаний символом, той самий
    набір `=, !=, <, <=, >, >=, between, not between, is empty, is not empty`, що й у approval
    criteria), значення `100000` (без коми).
-3. **FIELD SET**: **Annual Revenue**, **Email**, **Lead Source**, **Title**. Документ (редакція
-   27.09.2026) тут уже називає **Title**: композитне поле **Address - Country / Region** не
-   пропонується у FIELD SET цього тріалу (хоча воно ж чудово працює як критерій у RULE 1, нижче).
+3. **FIELD SET**: **Annual Revenue**, **Email**, **Lead Source**, **Title**. Композитне поле
+   **Address - Country / Region** не пропонується у FIELD SET цього тріалу (хоча воно ж чудово
+   працює як критерій у RULE 1, нижче).
 4. **RULE 1**: **Based on Criteria** → **Lead Source** is `Cold Call` → рецензент User B.
 5. Додай друге правило: **Lead Source** is `Advertisement` → User C.
 6. **Others** → User A.
@@ -255,7 +254,7 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
    кому ескалювати — User A.
 8. Причини: стандартні + `Revenue Data Unverifiable`. Збережи.
    **Що побачиш:** два процеси у списку, у порядку створення: `WF_General_Screening`, потім
-   `HV_Senior_Review` (перевірено в тріалі 26.09.2026 — найновіший стає **внизу**, не вгорі).
+   `HV_Senior_Review` (найновіший стає **внизу**, не вгорі).
 
 ---
 
@@ -277,15 +276,14 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
 
 1. **Create New Process**: `RJ_Resubmission_Review`, Leads, Standard; умова **Lead Status** is `Not
    Contacted`.
-2. **FIELD SET**: **Email**, **Phone**, **Company** (документ, редакція 27.09.2026, тут уже називає
-   **Company**: багаторядкове поле **Description** у тріалі 26.09.2026 взагалі не пропонується у
-   FIELD SET — пошук за цим словом у полі «Add Field» не дає жодного варіанта).
+2. **FIELD SET**: **Email**, **Phone**, **Company** (багаторядкове поле **Description** у FIELD SET
+   взагалі не пропонується — пошук за цим словом у полі «Add Field» не дає жодного варіанта).
 3. **RULE 1** → **All Records** → User A. **Others** тут не потрібен: All Records уже покриває все.
 4. **Actions**: три сповіщення ✔. Причини: дві нові. Збережи.
 5. Перевір порядок на сторінці списку: якщо процеси створювались саме в порядку
    `WF_General_Screening` → `HV_Senior_Review` → `RJ_Resubmission_Review`, список уже стоїть у
-   цьому порядку — у тріалі (26.09.2026) найстаріший процес лишається вгорі, найновіший стає
-   внизу, а не навпаки. Відкрий **Reorder Processes**, щоб переконатись і зробити скриншот (кнопка
+   цьому порядку — найстаріший процес лишається вгорі, найновіший стає внизу, а не навпаки. Відкрий
+   **Reorder Processes**, щоб переконатись і зробити скриншот (кнопка
    активна в межах одного модуля й лейауту — Leads/Standard, статус фільтра «All»); тут перетягувати
    нічого не треба.
    **Що побачиш:** підказку «Reordering infers the order of execution» і той самий порядок
@@ -366,7 +364,7 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
    **Що побачиш:** вікно **"Review History — Reviewed"** зі списком, найновіше згори: підсумкове
    **"Record reviewed — by ⟨ти⟩"**, а нижче — по рядку на кожне поле, у зворотному порядку рішень
    (**"Field '⟨поле⟩' approved — by ⟨ти⟩"**). Ім'я рецензента підписане в кожному рядку — це
-   підтверджений факт, а не «якщо нема — шукай у Timeline», як можна було подумати з довідки. Якщо в
+   саме так, а не «якщо нема — шукай у Timeline», як можна було подумати з довідки. Якщо в
    тебе **Review History** виглядає інакше — знайди рецензента в Timeline і
    запиши обидва факти. Скриншот екрана історії.
 
@@ -422,7 +420,7 @@ RV-10 — дослідницький: документація не каже, ч
 
 ### Здача
 
-Усе — в Zoho Office Suite, публічне посилання в чат ментору:
+Усе — в Zoho Office Suite, публічне посилання рецензенту (ментору, тренеру чи тімліду):
 
 | # | що | формат | інструмент |
 |---|---|---|---|
@@ -483,7 +481,7 @@ Steps | Expected Result | Actual Result | Status | Evidence**.
 | сценарій 5 потрапив у HV | `HV_Senior_Review` створено раніше за `WF_General_Screening` (список стоїть у порядку створення) — виправ через **Reorder Processes** |
 | у списку причин нема `Revenue Data Unverifiable` | рецензент працює в іншому процесі — причини в кожного процесу свої |
 | після відхилення в WF нема листа | так налаштовано: сповіщення на відхилення в WF вимкнене |
-| **Description** чи **Country** не пропонується у **FIELD SET** | обмеження типів полів для FIELD SET у цьому тріалі — документ (редакція 27.09.2026) це вже враховує і використовує Company/Title |
+| **Description** чи **Country** не пропонується у **FIELD SET** | обмеження типів полів для FIELD SET у цьому тріалі — використовуй Company/Title |
 | у **Review History** нема імені рецензента | у тріалі ім'я підписане в кожному рядку — якщо його нема, це розбіжність із твоїм тріалом, а не норма; перевір Timeline і зафіксуй різницю |
 | процес не видаляється | у ньому є записи на рев'ю |
 | адміністратор бачить запис, призначений User B | для адміністратора це нормально |
@@ -522,23 +520,22 @@ Processes** відкривається. Перевір, чи нема на Leads
 ліди, і на якому лейауті створюватимеш процеси.
 
 **16.3.** Налаштуй процес `WF_General_Screening` для Leads, лейаут Standard: умова входу **Lead
-Source** is `Web Download`; поля на рев'ю Email, Phone, Annual Revenue, Company (документ, редакція
-27.09.2026, тут уже називає Company: Description не пропонується у FIELD SET цього тріалу); Rule 1 —
+Source** is `Web Download`; поля на рев'ю Email, Phone, Annual Revenue, Company (Description не
+пропонується у FIELD SET цього тріалу); Rule 1 —
 **Country** is `United States` → рецензент User B; Others — усі інші → User C; дії — сповіщення на
 подачу і на завершення рев'ю; причини — три стандартні плюс `Missing Contact Details`. Збережи й
 зроби скриншот.
 
 **16.4.** Налаштуй процес `HV_Senior_Review` для Leads, лейаут Standard: умова **Annual Revenue**
-більше `100000`; поля Annual Revenue, Email, Lead Source, Title (документ, редакція 27.09.2026, тут
-уже називає Title: композитне поле Address - Country / Region не пропонується у FIELD SET цього
-тріалу); Rule 1 — **Lead Source** is
+більше `100000`; поля Annual Revenue, Email, Lead Source, Title (композитне поле Address - Country /
+Region не пропонується у FIELD SET цього тріалу); Rule 1 — **Lead Source** is
 `Cold Call` → User B; Rule 2 — **Lead Source** is `Advertisement` → User C; Others → User A
 (адміністратор); дії — сповіщення на подачу і на відхилення, SLA escalation 2 дні з ескалацією до
 User A; причини — стандартні плюс `Revenue Data Unverifiable`. Збережи й зроби скриншот.
 
 **16.5.** Налаштуй процес `RJ_Resubmission_Review` для Leads, лейаут Standard: умова **Lead Status**
-is `Not Contacted`; поля Email, Phone, Company (документ, редакція 27.09.2026, тут уже називає
-Company: Description не пропонується у FIELD SET цього тріалу); Rule 1 — **All Records** → User A;
+is `Not Contacted`; поля Email, Phone, Company (Description не пропонується у FIELD SET цього
+тріалу); Rule 1 — **All Records** → User A;
 дії — усі три сповіщення;
 причини — додати `Previously Rejected — No Change Detected` і `Incomplete Resubmission`. Відкрий
 **Reorder Processes** і переконайся, що список уже стоїть у порядку `WF_General_Screening` →
@@ -592,8 +589,8 @@ All reviews done as admin to save time.
 **16.12.** Здай A18: документ тестових сценаріїв (усі 5: передумови, кроки, очікуваний результат) у
 Zoho Writer; таблиця тест-кейсів у Zoho Sheet; звіт про дефекти в Zoho Writer, якщо щось знайдено;
 скриншоти або запис: усі 3 процеси, **Workqueue → My Jobs** з записами, що чекають, щонайменше один
-погоджений і один відхилений запис, екран **Review History**. Поділись публічним посиланням у чаті з
-ментором.
+погоджений і один відхилений запис, екран **Review History**. Поділись публічним посиланням з
+рецензентом.
 
 ---
 
@@ -655,8 +652,8 @@ Order (список за замовчуванням, порядок створе
 ```
 
 Порядок уже правильний одразу після створення трьох процесів у цій послідовності — Reorder
-Processes нічого не змінює, лише підтверджує (перевірено в тріалі 26.09.2026: найстаріший процес
-лишається вгорі, найновіший — унизу).
+Processes нічого не змінює, лише підтверджує (найстаріший процес лишається вгорі, найновіший —
+унизу).
 
 **16.6.**
 
@@ -728,7 +725,7 @@ Leads** ліда нема.
 - скриншоти: три конфігурації процесів і список після **Reorder Processes**; черга **Workqueue → My
   Jobs → Review Process** із записами, що чекають; сторінка погодженого `RV1-Approve` і
   відхиленого `RV2-RejectRevenue`; екран **Review History**;
-- одне публічне посилання в чаті ментору, перевірене з приватного вікна без входу.
+- одне публічне посилання рецензенту, перевірене з приватного вікна без входу.
 
 ---
 

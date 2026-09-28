@@ -112,7 +112,7 @@ Description, Modified by і Status. Статус буває draft (чернет�
 
 Кіоск сильний тим, що працює з даними CRM. Три джерела:
 
-**Current Record** — запис, з якого кіоск відкрили. У тріалі (27.09.2026) **Set Module** — не
+**Current Record** — запис, з якого кіоск відкрили. **Set Module** — не
 проста випадайка на канві: відкрий лівий панель джерел даних (стрілка-перемикач), у ньому розділи
 CurrentRecord / GetRecords / Queries, і клік по CurrentRecord відкриває модальне вікно
 «CurrentRecord Module», де й обираєш модуль (для нас — Leads). Після цього в кіоску з'являється
@@ -131,7 +131,7 @@ merge-поле вставляється як `${...}`.
 
 Приклад із Kiosk 1: поле **Lead Name** з увімкненим Merge from module, `#` → Current Record →
 **Lead Name**, плюс Read Only. Користувач бачить ім'я ліда, з якого відкрив кіоск, і не може його
-змінити. Це «якір», який підтверджує: оновлюєш саме цей запис. (У тріалі (27.09.2026) поле
+змінити. Це «якір», який підтверджує: оновлюєш саме цей запис. (У тріалі поле
 **Full Name**, яке описує довідка API, у списку `#` для Leads не пропонується — реальне поле для
 цього — **Lead Name**, теж лише для читання, що склеює First Name і Last Name.)
 
@@ -215,7 +215,7 @@ merge-поле вставляється як `${...}`.
    сповіщенням потрібної людини — з Home page (**Kiosk 2**).
 
 Після налаштування виконуються п'ять тестових сценаріїв, а результати оформлюються в Zoho Writer і
-Zoho Sheet і передаються ментору публічним посиланням у чаті.
+Zoho Sheet і передаються рецензенту (ментору, тренеру чи тімліду) публічним посиланням.
 
 **Part 1 — підготовка.** Перш ніж будувати кіоски, перевір шість речей:
 
@@ -269,7 +269,7 @@ Kiosk Studio (полотно, **+**, налаштування екранів і 
 | **Unified API Name** | обов'язкове; `LC_QuickUpdate` |
 | **Description** | `Post-call status update and note entry for recruiter use.` |
 
-У тріалі (26.09.2026) **Kiosk Name** не приймає символ підкреслення: поле показує помилку «A Kiosk's
+**Kiosk Name** не приймає символ підкреслення: поле показує помилку «A Kiosk's
 name can't contain the following special character: _». Тому для Kiosk Name візьми `LC QuickUpdate`
 (пробіл замість підкреслення), а підкреслення лишається в **Unified API Name**, де воно дозволене.
 Натисни **Next**. **Unified API Name** — нове обов'язкове поле, довідка його поки не описує. Судячи з
@@ -303,12 +303,11 @@ name can't contain the following special character: _». Тому для Kiosk N
 
 Значення picklist копіюй посимвольно зі списку Lead Status у тріалі: дія перенесе обране значення в
 справжнє поле, і розбіжність навіть в один пробіл дасть значення, якого в списку Lead Status немає.
-Чи оновлення тоді не пройде, чи запише «чуже» значення, у тріалі не перевірялось; у будь-якому разі
-це помилка конфігурації.
+Це помилка конфігурації незалежно від того, чи оновлення тоді не пройде, чи запише «чуже» значення.
 
 **Що побачиш:** від екрана відходять дві гілки — по одній на кожну кнопку.
 
-**Крок 3. Дії на гілці Save & Close.** У тріалі (27.09.2026) підтверджено: **Field Update**
+**Крок 3. Дії на гілці Save & Close.** **Field Update**
 приймає лише **одне** поле на дію (у формі є рівно `fieldOption1`/`fieldValue1`, без кнопки
 «додати ще поле»), і **Description** серед полів, які можна оновити, не пропонується взагалі. Тож
 на цій гілці — дві дії підряд, не одна.
@@ -329,7 +328,7 @@ name can't contain the following special character: _». Тому для Kiosk N
 | **Record Type** | Current Record |
 | **Note Content** | значення поля `Call Notes` з екрана `Call_Outcome_Entry` |
 
-Це підтверджено живим прогоном (TS1): дія `Add_Call_Note` створює новий запис Note з текстом Call
+Дія `Add_Call_Note` створює новий запис Note з текстом Call
 Notes, а поле **Description** ліда лишається незмінним — саме так, як і задумано, а не «дописати чи
 замінити», якого в Field Update просто немає.
 
@@ -364,7 +363,7 @@ Call_Outcome_Entry
 |---|---|
 | **Button Name** | `Log Call Outcome` |
 | **Add Description** | `Opens the post-call update kiosk for this lead.` |
-| **Define action** | **Kiosk** (у тріалі 26.09.2026 поруч у списку точно в такому порядку: Function, Open a Widget, Invoke a URL, Open a Web Tab, Client Script, Kiosk, Open a SlyteUI Component — останні дві позначені бейджем «New!») |
+| **Define action** | **Kiosk** (у тріалі поруч у списку точно в такому порядку: Function, Open a Widget, Invoke a URL, Open a Web Tab, Client Script, Kiosk, Open a SlyteUI Component — останні дві позначені бейджем «New!») |
 | **Select Page** | **In Record** (друга і єдина інша опція — **In List**) |
 | **Select Position** | у тріалі — єдина опція **Details** |
 | **Select Layout(s)** | **All Layouts** або конкретний layout зі списку макетів модуля (у тріалі — **Standard** та інші наявні макети) |
@@ -372,8 +371,8 @@ Call_Outcome_Entry
 | **Button Accessibility: Select Profile(s)** | усі профілі, які користуватимуться кнопкою: щонайменше Administrator і профілі User B та User C |
 
 Натисни **Save**. За довідкою, назва кнопки — до 30 символів, опис — до 250, а кнопок на модуль — до
-50. У тріалі (26.09.2026) підтверджено: поле Button Name справді обмежене 30 символами (`maxlength`),
-вибір **Kiosk** у Define action відкриває саме описані вище **Select Page** і **Configured Kiosk**.
+50. Поле Button Name справді обмежене 30 символами (`maxlength`), а вибір **Kiosk** у Define action
+відкриває саме описані вище **Select Page** і **Configured Kiosk**.
 Якщо після **In Record** форма попросить уточнити місце на сторінці, обери сторінку деталей запису:
 за довідкою Kiosk Studio, кнопка з кіоском працює лише на сторінці деталей і в списку модуля (поруч
 із пунктом More над списком або в кожному рядку). Натиснувши **Choose** біля Configured Kiosk до
@@ -453,15 +452,15 @@ Save & Close ні. Перевір дерево очима: дія має бут�
 
 **10. Видаляєш прив'язаний кіоск.** Поки кнопка існує, кіоск не видалити і не деактивувати.
 
-**11. Пробуєш зіставити два поля в одній дії Field Update.** У тріалі (27.09.2026) підтверджено:
-Field Update оновлює рівно одне поле за дію, а Description серед доступних полів немає взагалі.
+**11. Пробуєш зіставити два поля в одній дії Field Update.** Field Update оновлює рівно одне поле за
+дію, а Description серед доступних полів немає взагалі.
 Друге поле — це друга дія (тут — Add Note), а не другий рядок у тій самій.
 
 ### Симптом → причина
 
 | симптом | найімовірніша причина |
 |---|---|
-| у вікні Create Kiosk помилка «A Kiosk's name can't contain the following special character: _» | Kiosk Name не приймає підкреслення (підтверджено в тріалі 26.09.2026); заміни на пробіл, підкреслення лиши в Unified API Name |
+| у вікні Create Kiosk помилка «A Kiosk's name can't contain the following special character: _» | Kiosk Name не приймає підкреслення; заміни на пробіл, підкреслення лиши в Unified API Name |
 | на сторінці Kiosk Studio немає Create Kiosk, лише Get Started | кіосків ще немає — це порожній стан, тисни Get Started |
 | Configured Kiosk → Choose показує «No active Kiosks found» | кіоск ще не опубліковано (Publish); неопубліковані кіоски в цьому списку не з'являються |
 | у вікні Create Kiosk не вдається піти далі | не заповнене обов'язкове Unified API Name |

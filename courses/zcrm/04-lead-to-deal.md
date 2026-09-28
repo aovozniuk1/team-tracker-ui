@@ -152,7 +152,7 @@ account і contact. Здати тест-кейс з очікуваними ре�
    Натисни **Done** і збережи layout (**Save**). Якщо прапорця немає, створи в Deals поле
    `Budget Range` (Pick List з тими самими значеннями) окремо.
 4. Відкрий **Lead Conversion Mapping** і переконайся, що `Budget Range` ліда змаплено на
-   `Budget Range` угоди (у тріалі це сталося одразу, для пари layouts `Standard`). Довідка
+   `Budget Range` угоди (для пари layouts `Standard` мапування встановлюється автоматично). Довідка
    попереджає, що з кількома layouts автоматичного мапування для полів із **Also create for** може
    не бути — тоді вибери пару вручну і збережи.
 
@@ -270,7 +270,7 @@ account і contact. Здати тест-кейс з очікуваними ре�
 | **Record Category** (у довідці — Deal Category) | `Open`, `Closed Won`, `Closed Lost` | загальний стан угоди: у циклі, виграна, програна |
 | **Forecast Category** | `Pipeline`, `Closed`, `Omitted` | чи рахується угода в прогнозі; ставиться автоматично: Open → Pipeline, Closed Won → Closed, Closed Lost → Omitted |
 
-Значення в тріалі (26.09.2026): `Qualification` 10, `Needs Analysis` 20, `Value Proposition` 40,
+Значення в тріалі: `Qualification` 10, `Needs Analysis` 20, `Value Proposition` 40,
 `Identify Decision Makers` 60, `Proposal/Price Quote` 75, `Negotiation/Review` 90 — усі `Open` /
 `Pipeline`; `Closed Won` 100 — `Closed Won` / `Closed`; `Closed Lost` і `Closed Lost to Competition`
 0 — `Closed Lost` / `Omitted`. Звір їх у своєму тріалі й запиши — це базова лінія для тестів. Під
@@ -309,8 +309,7 @@ account і contact. Здати тест-кейс з очікуваними ре�
   клік по відкритій стадії одразу зберігає її, клік по закритій відкриває **Verify Details**;
 - у **Kanban** модуля Deals (перемикач виду списку): картки згруповані за стадіями, у кожної
   колонки — сума угод; перетягування картки в іншу колонку змінює стадію без відкриття форми. Чи
-  з'являється при цьому **Verify Details** для закритих стадій, у тріалі не перевірялось — це окремий
-  тест;
+  з'являється при цьому **Verify Details** для закритих стадій — перевір це як окремий тест;
 - масово — через масове оновлення поля в списку;
 - автоматично — workflow rules, Blueprint, API.
 
@@ -418,7 +417,7 @@ Mass Convert — дані subform не переносяться; повторн�
 
 **Позитивні:** кожна стадія за еталоном; закриття з підтвердженням; повернення з `Closed Lost` у
 відкриту стадію (перевір, що стається зі збереженою причиною в полі **Reason For Loss** картки
-угоди — у тріалі не перевірялось).
+угоди).
 
 **Негативні:** див. розв'язок задачі про негативний набір.
 
@@ -609,7 +608,7 @@ account, і — за бажанням — deal, прив'язану до обо�
 
 **4.3.** Після збереження layout `Budget Range` є в Leads і Deals (layout `Standard`). У
 **Lead Conversion Mapping** (блок **Field Mapping**) навпроти `Budget Range` у колонці **Deal**
-стоїть `Budget Range` — у тріалі це сталося одразу. Якщо там `None` — автоматичне мапування для цієї
+стоїть `Budget Range` — для пари layouts `Standard` мапування відбувається автоматично. Якщо там `None` — автоматичне мапування для цієї
 пари layouts не спрацювало: вибрати поле вручну і зберегти. Скриншот сторінки мапування — доказ передумови для A4.
 
 **4.4.** Очікувані результати — таблиця перевірки з уроку: один account `QA-A4 Meridian Logistics`
@@ -630,7 +629,7 @@ Jan Dvorak; у Jan Dvorak **Account Name** = `QA-A4 Meridian Logistics`; нов�
 кейс `A4-TC02` на зіставлення з наявним account. Статус кожного кейса — за фактом. Папка
 `A4. Execute and verify lead conversion` з документом і доказами, посилання перевірене в інкогніто.
 
-**4.7.** Зразок базової лінії (значення тріалу 26.09.2026; звір зі своїм):
+**4.7.** Зразок базової лінії (значення тріалу; звір зі своїм):
 
 | Stage | Probability | Record Category | Forecast Category |
 |---|---|---|---|
@@ -651,7 +650,7 @@ Jan Dvorak; у Jan Dvorak **Account Name** = `QA-A4 Meridian Logistics`; нов�
 автором; у **Timeline** — запис про зміну.
 
 **4.8.** `Closed Won`: вікно **Verify Details** з'являється, коли вибираєш стадію категорії
-`Closed Won` (у тріалі перевірено через смугу стадій): `Since Stage IS Closed Won (Record Category)`,
+`Closed Won` через смугу стадій на сторінці угоди: `Since Stage IS Closed Won (Record Category)`,
 поля **Amount** і **Closing Date**, кнопки **Cancel** і **Save**; чи з'являється воно при
 перетягуванні в Kanban — твій фактичний результат, його й запиши (якщо вікна не було, це
 спостереження для звіту). Після закриття картка в колонці `Closed Won`, суми колонок

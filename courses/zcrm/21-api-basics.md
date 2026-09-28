@@ -72,7 +72,7 @@ API domain (EU)         | версія  | модуль | ID запису
 
 (У справжній адресі частини йдуть підряд: `https://www.zohoapis.eu/crm/v8/Leads/4150868000001944196`.)
 
-Наш тріал живе в європейському дата-центрі, тому API domain — `https://www.zohoapis.eu`. Приклади в
+Твій тріал живе в європейському дата-центрі, тому API domain — `https://www.zohoapis.eu`. Приклади в
 документації Zoho написані для США (`https://www.zohoapis.com`) — доменну частину в них замінюєш.
 Для sandbox домен інший: за документацією, `sandbox.zohoapis.eu`.
 
@@ -173,14 +173,14 @@ v8):
 
 | термін | що це |
 |---|---|
-| Client | програма, яка звертається до API від імені користувача (у нас — твої запити в Postman) |
+| Client | програма, яка звертається до API від імені користувача (тут — твої запити в Postman) |
 | Client ID / Client Secret | «логін і пароль» клієнта; видаються при реєстрації клієнта в API Console |
 | Grant token (authorization code) | короткоживучий одноразовий код, що підтверджує згоду користувача на скоупи |
 | Access token | ключ, який іде в кожному запиті; дійсний одну годину |
 | Refresh token | довгоживучий ключ для отримання нових access token; не спливає, доки його не відкличуть |
 | Scope | що саме дозволено токену |
 
-**Потік для нашого випадку:**
+**Потік, який використовуєш тут:**
 
 ```
 1. Реєструєш клієнта в API Console (https://api-console.zoho.eu)        → Client ID + Client Secret
@@ -272,7 +272,7 @@ Zoho CRM рахує використання API в **кредитах**. Кож
 **Добовий ліміт** рахується в ковзному вікні 24 години від моменту виклику і залежить від
 редакції та кількості ліцензій. Для Enterprise / Zoho One: 50 000 + 1 000 за кожну ліцензію
 користувача + докуплені кредити, максимум 5 000 000. Тріал має ті самі ліміти, що й відповідна
-платна редакція. У нашому тріалі API Dashboard показує добовий ліміт 60 000 — за формулою це
+платна редакція. У твоєму тріалі API Dashboard показує добовий ліміт 60 000 — за формулою це
 відповідає 10 ліцензіям.
 
 Коли використано 50% і більше добового ліміту, у відповідях з'являється заголовок
@@ -298,7 +298,7 @@ Composite API, пошук з функції) діє ще **sub-concurrency** —
 
 | віджет Dashboard | що показує |
 |---|---|
-| **API Credits Usage** | використані і невикористані кредити за період, середнє за день; у тріалі (26.09.2026) періоди Last 24 Hours, Yesterday, Last 7 Days, Last 30 Days, Specific Date, Custom (документація згадує ще Today); фільтр версії API (All Versions, Version 8 … Version 2) і примітка «Data may take up to 15 minutes to reflect.» |
+| **API Credits Usage** | використані і невикористані кредити за період, середнє за день; у тріалі періоди Last 24 Hours, Yesterday, Last 7 Days, Last 30 Days, Specific Date, Custom (документація згадує ще Today); фільтр версії API (All Versions, Version 8 … Version 2) і примітка «Data may take up to 15 minutes to reflect.» |
 | **Configure Notification** | налаштування сповіщень про витрату |
 | **Total API Credits Consumed** | витрачено від добового ліміту (у тріалі — x / 60000) |
 | **Integration Task Credits** | кредити, витрачені integration tasks у функціях |
@@ -315,7 +315,7 @@ Composite API, пошук з функції) діє ще **sub-concurrency** —
 періодично видаляються.
 
 **Configure Notification** відкриває вікно **API Usage Notification Configuration**. У тріалі
-(26.09.2026) у ньому: **Notification Type** — прапорці **Email** (увімкнено) і **In Product**;
+у ньому: **Notification Type** — прапорці **Email** (увімкнено) і **In Product**;
 **Notification Recipients** — `1 user` і посилання **Edit** (за замовчуванням — суперадмін орга);
 **Credits Threshold percentage for notification** — три поля зі значеннями 100, 90 і 80 і підказка
 «Threshold value should be between 50 and 100»; **Notification frequency** — `1` for every `24`
@@ -505,7 +505,7 @@ GET  /crm/bulk/v8/read/{job_id}/result → ZIP-архів із CSV (колонк
 
 ## 21.12. Що варто запам'ятати
 
-1. REST API Zoho CRM: HTTP + JSON, поточна версія v8; для нашого тріалу — домени `.eu`.
+1. REST API Zoho CRM: HTTP + JSON, поточна версія v8; для твого тріалу — домени `.eu`.
 2. Запит = метод + URL + заголовки + тіло; у JSON і шляхах — лише API-імена.
 3. Заголовок авторизації — `Zoho-oauthtoken <access_token>`; записи в тілі — у масиві `data`.
 4. HTTP-код один на запит, статус — у кожного запису; 207 — частковий успіх.

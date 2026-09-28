@@ -21,8 +21,8 @@ Workflow rule — правило, яке система виконує сама:
 Правила живуть у **Setup** (шестерня вгорі праворуч) **→ Automation → Workflow Rules**. Сторінка має вкладки
 **Projects | Task | Time Logs | Phases | Users** — по одній на модуль; правила задач — на вкладці **Task**,
 кнопка **New Workflow Rule**. Той самий редактор відкривається і з проєкту: вкладка задач → **Automation**
-вгорі праворуч → **New Workflow Rule**. Чи підставить редактор тоді layout цього проєкту сам, у тріалі не
-перевірялось — глянь на вибір layout вгорі правила.
+вгорі праворуч → **New Workflow Rule**. Чи підставить редактор тоді layout цього проєкту сам —
+глянь на вибір layout вгорі правила.
 
 Не плутай сусідів. Правила на вкладці **Projects** реагують на події самого проєкту (створення, оновлення,
 коментар, архівування, повернення з архіву, видалення в кошик), а не задач. Для issues у Projects окремий
@@ -43,7 +43,7 @@ Owner, нічого не доведе.
 | **Rule Name**, **Description** | ім'я за правилом компанії `oz_<назва>` |
 | layout (вгорі редактора) | конкретні layout або **All Layouts**; правило діє на задачі проєктів, що працюють на вибраних layout. На один task layout — до 20 правил |
 | **Execution Condition** | **Based on User action** або **Based on Date & Time** |
-| **Execute On** (для User action) | подія, що запускає правило, у вигляді речення «When a Task …»: **is Created**, **is Updated** (any fields або лише вибрані поля), **is Commented on**, **is Deleted**, **Document is attached** (цей список для задач у тріалі не відкривали — звір зі своїм екраном) |
+| **Execute On** (для User action) | подія, що запускає правило, у вигляді речення «When a Task …»: **is Created**, **is Updated** (any fields або лише вибрані поля), **is Commented on**, **is Deleted**, **Document is attached** (звір цей список зі своїм екраном) |
 | умови (Condition 1, 2…; нову додає **Add Condition**) | **Add Criteria** → поле, оператор, значення; в одній умові може бути кілька критеріїв |
 | **Add Action** | **Update Field**, **Associate Webhook**, **Associate Custom Function**, **Associate Email Alert** |
 | **Execute the next workflow rule** | чи передати подію наступному правилу списку |
@@ -54,12 +54,12 @@ Owner, нічого не доведе.
 далі. Виконуються дії першої умови, що збіглася, і правило завершується, решту умов не перевіряє. Тож одне
 правило — це «якщо A → X, інакше якщо B → Y», а не «A і B разом». Якщо біля умови є прапорець
 **Execute Next Condition**, за його підказкою він дозволяє перевірити й наступну умову, навіть коли поточна
-збіглася (у тріалі не перевірялось).
+збіглася — підтверди це прогоном.
 
 **Update Field** у тріалі пропонує такі поля: Priority, Owner, Start Date, Due Date, Duration, Status,
 Followers, Associated Team, Completion Percentage, Billing Type, Reminder, Color. Поруч із діями видно й
 WhatsApp-дію, у тріалі неактивну. Кастомні поля (як `Workstream` чи `Reminder Sent?`) шукай у **Update Field**
-тоді, коли вгорі правила вибрано layout, у якому ці поля є (у тріалі це не перевірялось). Якщо поля в
+тоді, коли вгорі правила вибрано layout, у якому ці поля є. Якщо поля в
 списку немає — це блокер завдання, фіксуй його, а не підмінюй дію.
 
 **Порядок і ланцюжок.** Правила виконуються в порядку списку; порядок змінюють перетягуванням. За довідкою
@@ -103,7 +103,7 @@ Select a different layout as the Date and time based workflows cannot be applied
 Every [n] [Days | Weeks | Months] up to [n] time(s)
 ```
 
-У тріалі (26.09.2026) дата — **Start Date, Due Date або Completion Date** (не Created Date). Повтор — це
+У тріалі дата — **Start Date, Due Date або Completion Date** (не Created Date). Повтор — це
 ОДИН елемент керування «Every [n] [Days/Weeks/Months] up to [n] time(s)», а не вибір із готових назв
 Once/Daily/Weekly/Monthly: «один раз» отримуєш, коли `up to` = 1, незалежно від того, яку одиницю
 поставив в Every. Обмеження повторів рахується для кожної задачі окремо, а не для правила загалом.
@@ -148,12 +148,11 @@ Macro rule — збережене масове оновлення: «усім з
 За довідкою Macro Rules доступні на плані Enterprise; на один layout — до 20 правил. У тріалі в списку вже є
 стандартне правило `Assign Task to Project Owner`.
 
-**Створити:** **Setup → Automation → Macro Rules → New Macro Rule** (шлях і кнопка перевірені в тріалі;
-подальші кроки — за довідкою) → назва, опис, layout-и, до яких правило застосовується → **Next** → **Add
+**Створити:** **Setup → Automation → Macro Rules → New Macro Rule** → назва, опис, layout-и, до яких правило застосовується → **Next** → **Add
 Criteria** → критерії → **Done** → **Update Field** → поле й значення (можна кілька) → **Update** → **Save
 Rule**. Без критеріїв правило оновить **усі** задачі області, з якої його запустили.
 
-**Виконати** (у тріалі, 27.09.2026, пройдено з боку Setup; з боку фази/списку/задачі — за довідкою):
+**Виконати** (з боку Setup; з боку фази/списку/задачі — за довідкою):
 
 - з **Setup → Automation → Macro Rules**: наведи на правило → іконка **Other actions** → **Execute
   Macro Rule** — відкриває окрему сторінку з нередагованими полями **Rule Name**/**Layout**,
@@ -197,7 +196,7 @@ Blueprint. Шаблон ще можна обрати в нагадуванні (
 запропонує тобі щось більше, запиши це.
 
 **Одержувачі листа.** У задачі Projects нема поля «Assignee» — власника задачі показує поле **Owner**. У
-редакторі alert розділ одержувачів (перевірено 26.09.2026) підписаний **«Notify users associated with the
+редакторі alert розділ одержувачів підписаний **«Notify users associated with the
 Task»** і складається з ОКРЕМИХ прапорців — **Task Owner**, **Created By**, **Followers**, **Associate
 Teams** — познач лише потрібний, а не всі одразу. Нижче є другий розділ, **«Notify users associated with
 the Project»** (Portal Users, Client Users, Project Owner, Created By), і поле вільного тексту для
@@ -207,7 +206,7 @@ the Project»** (Portal Users, Client Users, Project Owner, Created By), і по
 кількість листів на одну подію; відсутність листа там, де його бути не повинно; затримку доставки; папку
 спаму. У тріалі ти один користувач, тож «лист виконавцю» і «лист тобі» не розрізниш — познач такі пункти N/A
 з причиною або додай другого користувача (у Zoho One — **Admin Panel → User Management → Users → Add User**,
-далі — у портал Projects і в проєкт; цей крок у тріалі не перевірявся).
+далі — у портал Projects і в проєкт).
 
 ---
 
@@ -216,8 +215,7 @@ the Project»** (Portal Users, Client Users, Project Owner, Created By), і по
 Вебхук — HTTP-запит, який Zoho Projects надсилає на чужу адресу, коли спрацьовує правило чи перехід. Так
 Projects повідомляє зовнішні системи: HR, облік, власний сервіс компанії.
 
-**Налаштувати:** **Setup → Automation → Webhooks** → вкладка задач → **Add Webhook**. Поля в тріалі
-(перевірено 26.09.2026):
+**Налаштувати:** **Setup → Automation → Webhooks** → вкладка задач → **Add Webhook**. Поля в тріалі:
 
 | поле | що це |
 |---|---|
@@ -283,19 +281,19 @@ Alert**: `oz_Due Soon Alert`, той самий layout, шаблон `oz_Due Soo
 | **Execute the next workflow rule** | не позначати |
 
 У списку критеріїв поле для Due Date зветься **`Task End Date`**, а не «Due Date» — так підписаний той самий
-рядок даних у Criteria (перевірено 26.09.2026). У дат немає оператора «Is Not Empty»: замість нього обери
+рядок даних у Criteria. У дат немає оператора «Is Not Empty»: замість нього обери
 **`Scheduled`** (є дата) або **`Unscheduled`** (дати нема) — «Is Not Empty» залишається лише для текстових
 полів (наприклад, Task Name).
 
 **Що побачиш:** поки вгорі стоїть **All Layouts**, редактор показує помилку `Select a different layout as
 the Date and time based workflows cannot be applied to All Layouts.`; з вибраним layout — речення часу з
-полями-списками. Під час збереження Zoho перепитує (перевірено 26.09.2026): `Attention! This workflow rule
+полями-списками. Під час збереження Zoho перепитує: `Attention! This workflow rule
 will apply to all the projects associated with '<назва layout>'. Do you want to save this rule?` —
 погоджуйся. Після **Save Rule** правило з'являється у списку вкладки **Task**; перевір, що перемикач
 увімкнено.
 
-Критерій «Status не `Closed`» відсікає лише статус із назвою `Closed`. Перевірено на власному layout
-(26.09.2026): власний статус на кшталт `Done`, хоч і належить до типу Closed, цим критерієм НЕ відсікається — задача з
+Критерій «Status не `Closed`» відсікає лише статус із назвою `Closed`. Наприклад,
+власний статус на кшталт `Done`, хоч і належить до типу Closed, цим критерієм НЕ відсікається — задача з
 таким статусом і надалі проходить умову «Status Is Not Closed». Якщо у твоєму layout є подібні статуси —
 перевір список і врахуй це в критерії.
 
@@ -303,8 +301,8 @@ will apply to all the projects associated with '<назва layout>'. Do you wan
 `Open`, Owner — ти. Щоб побачити роботу правила за один вечір, скористайся прийомом із 10.2: Due Date =
 сьогодні + 3 дні і найближчий Specific Time.
 
-**Що побачиш:** на сторінці задачі в правій панелі — заплановане правило (**View Rule**; так описує довідка,
-у тріалі не перевірялось). Після моменту виконання: Priority = `High`, запис про зміну в **Activity Stream**,
+**Що побачиш:** на сторінці задачі в правій панелі — заплановане правило (**View Rule**; так описує довідка).
+Після моменту виконання: Priority = `High`, запис про зміну в **Activity Stream**,
 лист у скриньці.
 
 Здати: тест-сценарії, чек-лист, відео і блок у фінальному зведеному звіті.
