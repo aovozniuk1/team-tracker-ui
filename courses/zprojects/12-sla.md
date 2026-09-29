@@ -46,9 +46,9 @@ Project**, і SLA проєкту A не діє на issues проєкту B. К�
 | поле | що вказуєш |
 |---|---|
 | **Name** | назва SLA |
-| **Execute On** | коли SLA перевіряє, чи застосуватися до issue: `Creation`, `Updation`, `Creation or Updation`, `Field Update` |
+| **Execute On** | коли SLA перевіряє, чи застосуватися до issue: `Issues Creation`, `Issues Updation`, `Issues Creation or Updation`, `Field Update` |
 
-У списку ці варіанти можуть мати префікс `Issues` (`Issues Creation or Updation`), як у business
+У тексті уроку перші три звуться коротко (Creation, Updation, Creation or Updation), як у business
 rules. Далі — кнопка **Add targets for this SLA**.
 
 `Creation or Updation` важливий для реального процесу: баг часто створюють як `Major`, а через
@@ -56,7 +56,7 @@ rules. Далі — кнопка **Add targets for this SLA**.
 
 ### Крок Add targets
 
-**Умови** — які issues потрапляють під SLA. Документ згадує поля Severity, Modified Date, Release
+**Умови** — які issues потрапляють під SLA. Документ згадує поля Severity, Last Modified Time, Release
 Phase; довідка — ще Last Closed Date. Умов може бути кілька (продукт дозволяє до 10).
 
 **Ціль** складається з кількох налаштувань:
@@ -100,7 +100,7 @@ CAN ADD UP TO 4 LEVELS IN AN SLA)»; наступний рівень додає 
 | **Duration** (лише при Before/After) | готовий список: `30 minutes`, `1 hour`, `2/4/6/12/24 hours`, `2/3/4/5 days`, `1 Week`, `2 Weeks`, **Custom** (своє число, Hours або Days) |
 | **Escalate to** | чекбокси **Project Owner**, **Assignee**, **Reporter**, **Followers** + окреме поле «Escalate to the following Project/Client Users» |
 | **Email Template** | наявний шаблон або **Create new email template** тут же (відкриває форму Name/Subject/Insert Placeholder/текст; після Save шаблон одразу підставляється в поле) |
-| дії | до 10 дій, кожна — рядок «поле = значення» |
+| дії | кожна — рядок «поле = значення»; ліміт — 10 дій на всю SLA, а не на рівень |
 
 **Пастка з Duration.** У списку Duration нема простого варіанту «1 день»: після
 `12 hours` одразу йде `24 hours`, а «1 day» серед готових значень відсутній — наступний крок угору вже
@@ -137,9 +137,10 @@ first SLA which matches the criteria is executed». Тобто:
 
 ### Стабільні й мінливі поля
 
-Документ радить будувати SLA на умовах, які зазвичай не змінюються протягом життя issue: Title,
-Reporter, Module. Довідка каже ще прямолінійніше: хороша SLA спирається на сталі параметри (Title,
-Reporter, Module, дата подання), а **Status, Severity, Is it Reproducible — змінюються**.
+Документ радить будувати SLA на умовах, які зазвичай не змінюються протягом життя issue: Issues
+Name (так у Criteria зветься назва issue), Reporter, Module. Довідка каже ще прямолінійніше: хороша
+SLA спирається на сталі параметри (Title, Reporter, Module, дата подання), а **Status, Severity,
+Is it Reproducible — змінюються**.
 
 Обидва завдання цього уроку будують SLA саме на **Severity**. Це не заборона, а ризик, і його
 треба протестувати: що буде з ціллю й ескалаціями, коли Severity підняли чи знизили вже після того,
@@ -372,7 +373,8 @@ Due Date issue — постав його заздалегідь, інакше р
 бери `24 hours` (або **Custom**, якщо потрібна інша одиниця) — і все одно звіряй показаний час
 Level 1 з часом створення issue, а не покладайся на назву пункту.
 
-Рядок **Actions on Escalation** виглядає необов'язковим (підпис «до 10 дій»), але лишити його на
+Рядок **Actions on Escalation** виглядає необов'язковим (підпис «You can add up to 10 actions in an
+SLA»), але лишити його на
 `-Select-` не можна: **Save** тоді мовчки не спрацьовує, лише на мить з'являється toast «Please
 select an action», який легко пропустити. Обери будь-яке поле й значення для кожного рівня —
 інакше не збережеться вся SLA, а не тільки цей рівень.
@@ -623,7 +625,7 @@ Severity.
 2. Три кроки майстра: **Create** (Name, Execute On) → **Add targets** (умови, Close/Resolve Before,
    Target Field, Target Time, Calendar/Business hours) → **Escalate** (Escalate on, Escalate to,
    Email Template, дії) → **Save**.
-3. До чотирьох рівнів ескалації і до 10 дій.
+3. До чотирьох рівнів ескалації і до 10 дій на всю SLA (не на рівень).
 4. На issue діє перша SLA в списку, під умови якої він підходить; порядок — **Save Order**;
    **Activate / Deactivate** без видалення.
 5. Severity — мінливе поле; SLA на ньому треба тестувати на зміну severity.

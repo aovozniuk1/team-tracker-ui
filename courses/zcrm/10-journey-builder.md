@@ -41,7 +41,7 @@ Journey**. Діалог нового journey: **Journey name**, **Description**,
 тріалі очікуй 2.0. Документ завдання і частина довідки Zoho описують 1.0, а у 2.0 змінились і
 назви, і частина моделі:
 
-| у документі (1.0) | у CommandCenter 2.0 |
+| у CommandCenter 1.0 | у CommandCenter 2.0 |
 |---|---|
 | State (стан) з полем Module | Stage (етап) без модуля; модуль задають сигнали переходів і групи дій |
 | тригер: Creation of a record, Edit of a record тощо | Signals: події записів (створення, редагування…), вебформ, листів, дзвінків, застосунків Zoho; API-тригери замінено на Custom Signals |
@@ -73,8 +73,9 @@ operation. Contact your administrator."** — хоча дозвіл **CommandCen
 Відкривши один із них, бачиш, що це CommandCenter 2.0: у панелі **ELEMENTS** редактора є **Stage**
 (замість **State**), **Transition**, **Wait**, **Common Transition**, **Success Stage** і
 **Failure Stage**. "Wait", "Common Transition", "Success Stage" і
-"Failure Stage" — самостійні типи елементів 2.0, яких немає в таблиці відповідностей вище; документ
-завдання і довідка 1.0 їх не згадують, бо це елементи саме нової версії.
+"Failure Stage" — самостійні типи елементів 2.0, яких немає в таблиці відповідностей вище; довідка
+1.0 їх не згадує, бо це елементи саме нової версії (документ завдання бере з них **Success Stage** і
+**Failure Stage** для кінцевих етапів).
 
 Кроки 10.6–10.9 (побудова journey Deals → Quotes, публікація, тести) нижче спираються на довідку
 2.0 і документ завдання.
@@ -283,13 +284,13 @@ Review`, що обидва реагують на редагування проп
    з'являється вже з'єднаним зі стартовою точкою **Start**. (У 1.0 — порожню канву.)
 2. **Етапи (стани).** Створи п'ять етапів:
 
-   | State Name | записи модуля | дії | дедлайн |
+   | Stage Name | записи модуля | дії | дедлайн |
    |---|---|---|---|
    | `Prospecting & Qualification` | Deals | Recurring: кожен 1 день → Task `Daily Qualification Follow-up` для власника угоди | — |
    | `Pending Quote Creation` | Deals | для записів з переходу `Value Threshold Met`: тег `High_Value_Verified` (крок 4) | 2 дні → ескалація |
    | `Quote Under Review` | Quotes | Instant: Field update → **Quote Stage** = `Draft` | — |
-   | `Negotiation Successful` | Quotes | — | — |
-   | `Negotiation Failed` | Quotes | — | — |
+   | `Negotiation Successful` (елемент **Success Stage**) | Quotes | — | — |
+   | `Negotiation Failed` (елемент **Failure Stage**) | Quotes | — | — |
 
    Документ дає кожному стану поле Module. У 2.0 етап модуля не має: записи Deals чи Quotes
    приводять в етап сигнали вхідних переходів, а модуль для дій обираєш у групі дій. (У 1.0 модуль

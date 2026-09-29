@@ -358,10 +358,10 @@ Associate.
 
 | у завданні | поле в редакторі | значення |
 |---|---|---|
-| Blueprint Name | **Title** | `Issue Escalation Process` |
+| Title | **Title** | `Issue Escalation Process` |
 | — | **Description** | коротко, наприклад `Escalation path for tasks named Issue` |
-| Layout | **Associated Layout** | layout навчального проєкту |
-| Blueprint Criteria | **Criteria** | **Task Name**, оператор `Contains`, значення `Issue` |
+| Associated Layout | **Associated Layout** | layout навчального проєкту |
+| Criteria | **Criteria** | **Task Name**, оператор `Contains`, значення `Issue` |
 
 **Що побачиш:** редактор із частинами **Blueprint Info**, **Status**, **Transitions**.
 
@@ -448,11 +448,11 @@ layout (приватний layout підписаний назвою проєкт
 | шаблон і alert | для переходу | одержувач |
 |---|---|---|
 | `oz_Editorial Review Request` | A `Submit for Editorial Review` | ти (у завданні ти граєш роль Editorial Group) |
-| `oz_Content Approved` | D `Approve` | ти; якщо серед одержувачів є Reporter, можна обрати його |
+| `oz_Content Approved` | D `Approve` | ти (або **Created By**, якщо хочеш перевірити листи автору задачі) |
 
-Reporter тут, найімовірніше, не знайдеться: довідка перелічує одержувачами alert-а ролі, користувачів
-проєкту чи клієнта й конкретні адреси, а серед стандартних полів задачі Reporter немає (він є в issues).
-Тоді лишай одержувачем себе й запиши у звіт, що лист Reporter перевірити не вдалося.
+Reporter серед одержувачів task-alert-а немає: там **Task Owner**, **Created By**, **Followers**,
+**Associated Team** і користувачі проєкту чи клієнта, а Reporter є лише в issues. Тож лишай
+одержувачем себе (або **Created By**).
 
 **Крок 4. Задача «з минулого».** До публікації створи в `Content QA Project` задачу `Content - Old checklist`.
 
@@ -600,8 +600,9 @@ blueprint is applied.» або «… is mapped to a blueprint. Please use transi
 ### Один користувач
 
 У тріалі ти один: власник задачі, виконавець, адресат листа і той, хто натискає кнопки. Тож не перевіриш ні
-обмеження **Users** на переході, ні те, що лист іде саме Reporter, а не тобі. Такі пункти познач у чек-листі
-як N/A з причиною. Якщо хочеш їх закрити, потрібен другий користувач: у Zoho One його додають в **Admin Panel →
+обмеження **Users** на переході, ні те, що лист іде саме іншому одержувачу (наприклад **Created By**),
+а не тобі. Такі пункти познач у чек-листі як N/A з причиною. Якщо хочеш їх закрити, потрібен другий
+користувач: у Zoho One його додають в **Admin Panel →
 User Management → Users → Add User**, а потім — у портал Projects і в проєкт.
 
 ### Сценарії документа
@@ -859,7 +860,7 @@ Notes (Multi-Line), Current Phase (Pick List: `Draft`, `Editorial`, `Design`, `A
   обов'язкове поле Comments. After: Current Phase = `Design`.
 - D `Approve`, Design/Layout → Approved. Before: Current Phase = `Design`. During: повідомлення
   `Attach final approved file before completing approval.` і обов'язкове поле Comments. After: Current
-  Phase = `Approved` і Email Alert тобі (або Reporter, якщо хочеш перевірити листи Reporter).
+  Phase = `Approved` і Email Alert тобі (або **Created By**, якщо хочеш перевірити листи автору задачі).
 
 До публікації створи `Content - Old checklist`, після публікації підключи її через Associate Blueprint.
 Тестові задачі: `Content - Blog post draft` (Urgency = `High`) і `Content - FAQ update` (Urgency = `Low`, не

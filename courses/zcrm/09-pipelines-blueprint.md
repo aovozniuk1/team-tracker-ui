@@ -91,7 +91,8 @@ Deals → **Stage-Probability Mapping**.
 
 ### Діалог Create New Pipeline
 
-На сторінці **Setup → Customization → Pipelines** кнопка **Create New Pipeline** відкриває діалог:
+На сторінці **Setup → Customization → Pipelines** кнопка **Create New Pipeline** (так вона підписана,
+поки pipelines ще немає; далі — **+ New Pipeline**) відкриває діалог:
 
 - **Pipeline Name** — назва;
 - **Layout** — до якого layout належить pipeline;
@@ -271,7 +272,7 @@ Retention Metrics.
    **Що побачиш:** у списку pipelines для `Enterprise Net-New` — `Net-New Pipeline` і,
    найімовірніше, `Standard` з усіма старими стадіями. У Standard `Value Proposition` тепер
    теж 50 %.
-6. Знову **Create New Pipeline**: `Renewal Pipeline`, layout `Client Renewals`.
+6. Тепер кнопка зветься **+ New Pipeline**: `Renewal Pipeline`, layout `Client Renewals`.
 
    | стадія | звідки | Probability | Record Category | Forecast Category |
    |---|---|---|---|---|
@@ -555,7 +556,8 @@ Validation, Value Proposition, Contract Negotiation, Closed Won, Closed Lost. У
 Management → Blueprint** створи blueprint:
 
 - Blueprint Name: `Enterprise Contract Approval`; Target Module: Deals; Target Layout: `Enterprise
-  Net-New` (Client Renewals виключено); Target Pipeline: `Net-New Pipeline`;
+  Net-New` (Client Renewals виключено); Target Pipeline (**Choose Pipeline**, з'являється після
+  **Choose field**: `Stage`): `Net-New Pipeline`;
 - State 1 `Value Proposition` → перехід `Initiate Contracting`: Before — доступний власнику
   запису; During — **+Add → Associated Items → Attachments** (чернетка пропозиції) і **Notes**
   (обґрунтування ціни), обидва Mandatory; цільовий стан — `Contract Negotiation`;

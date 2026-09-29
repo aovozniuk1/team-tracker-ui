@@ -446,7 +446,7 @@ Precondition:
   - Signed in to Zoho One (EU trial) at one.zoho.eu.
   - Projects is active in the organization and not pinned to the One Bar.
 Steps:
-  1. Click ••• at the bottom of the One Bar.
+  1. Click ••• below the pinned apps on the One Bar.
   2. In Other Apps, click the star next to Projects.
   3. Check the One Bar.
   4. Sign out, then sign in again at one.zoho.eu.

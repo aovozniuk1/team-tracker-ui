@@ -100,8 +100,9 @@ users, roles, groups або record owner, до 5 на правило. Досит
 системне представлення `Leads in Review`; хто саме його бачить, довідка описує суперечливо (в
 одному місці — рецензенти й адміністратори, в іншому — «не рецензенти») — перевір у тріалі.
 
-**Історія.** На сторінці переглянутого запису: **More → Review History** — дата входу в процес,
-переглянуті й повторно переглянуті поля, погоджені поля, дата рев'ю; решта подробиць — у Timeline.
+**Історія.** На сторінці переглянутого запису: **More → Review History** — переглянуті й повторно
+переглянуті поля, погоджені поля, дата рев'ю (лише рішення); дату входу в процес («Lead was submitted
+for review …») і решту подробиць показує Timeline.
 У My Jobs довідка описує ще журнал **Review Logs** (дії Entered, Re-entered, Rejected, Reviewed,
 Unreviewed). **Setup → Process Management → Review Processes → Review Analytics** — чотири готові
 звіти: середній час очікування, статуси за кількістю записів, статуси полів, причини відхилення.
@@ -366,7 +367,8 @@ Unreviewed). **Setup → Process Management → Review Processes → Review Anal
    (**"Field '⟨поле⟩' approved — by ⟨ти⟩"**). Ім'я рецензента підписане в кожному рядку — це
    саме так, а не «якщо нема — шукай у Timeline», як можна було подумати з довідки. Якщо в
    тебе **Review History** виглядає інакше — знайди рецензента в Timeline і
-   запиши обидва факти. Скриншот екрана історії.
+   запиши обидва факти. Дати входу в процес тут немає — її показує Timeline: *"Lead was submitted
+   for review by ⟨ти⟩ via Review Process ⟨процес⟩"*. Скриншот екрана історії.
 
 ### Сценарій 5. Порядок процесів
 
@@ -436,7 +438,8 @@ Scenario 2 — Reject a single field and observe record lock
 Preconditions: HV_Senior_Review active, 2nd in order; User B is Rule 1 reviewer.
 Test data: Lead RV2-RejectRevenue, Lead Source = Cold Call, Annual Revenue = 150000.
 Steps: 1. As admin create the lead. 2. As User B open Workqueue > My Jobs > Review Process.
-       3. Reject Annual Revenue with reason "Revenue Data Unverifiable". 4. Open Leads > All Leads.
+       3. Reject the Annual Revenue field, then reject the record with reason
+       "Revenue Data Unverifiable". 4. Open Leads > All Leads.
 Expected: record status Rejected; rejection email sent; lead is not listed in All Leads.
 ```
 
@@ -551,13 +554,15 @@ is `Not Contacted`; поля Email, Phone, Company (Description не пропо�
 States`; відкрий **Workqueue → My Jobs**, відкрий запис, що чекає, погодь усі поля по одному й
 переконайся, що після повного погодження лід є у списку Leads. **2:** створи лід під умову
 `HV_Senior_Review` (**Annual Revenue** понад `100000`, **Lead Source** `Cold Call`); на екрані рев'ю
-відхили поле **Annual Revenue** з причиною `Revenue Data Unverifiable`; переконайся, що статус став
+відхили поле **Annual Revenue**, а тоді відхили запис з причиною `Revenue Data Unverifiable`
+(**Reason for rejecting a record**); переконайся, що статус став
 `Rejected`, а ліда нема в стандартному списку Leads. Потрібні три процеси в порядку WF → HV → RJ.
 
 **16.8.** Сценарії 3 і 4. **3:** створи лід під умову `RJ_Resubmission_Review`; погодь два поля, одне
 лиши; зафіксуй статус рев'ю запису; потім відхили останнє поле й підтвердь фінальний статус. **4:**
 обери повністю погоджений лід у модулі Leads, натисни **More** і відкрий **Review History**;
-переконайся, що в історії є дата входу в процес, переглянуті поля, рішення і хто рецензував.
+переконайся, що в історії є переглянуті поля, рішення і хто рецензував, а дату входу в процес знайди
+в Timeline.
 
 **16.9.** Сценарій 5. Створи лід, що одночасно відповідає умовам `WF_General_Screening` і
 `HV_Senior_Review`. Переконайся, що він потрапив у перший процес за порядком (`WF_General_Screening`),
@@ -681,11 +686,11 @@ Leads** ліда нема.
 погоджених полів запис досі на рев'ю, статус — той, що показав тріал (за довідкою очікувано
 `Review in Progress`); рішення по третьому, останньому полю (**Company** — Reject) відкриває вікно
 **"Record is going to be rejected"**, де обирається причина, і лише тоді запис стає `Rejected`.
-Сценарій 4: **More → Review History** показує вікно **"Review History — Reviewed"** з датою входу,
-кожним полем і рішенням по ньому — і ім'я рецензента підписане в **кожному** рядку («by ⟨ім'я⟩»), не
-лише в Timeline. Якщо в тебе інакше — це і є розбіжність, кейс FAIL, в **Actual Result** обидва
-факти, у звіті про дефекти — різниця з тим, що описано тут. Не пиши «рецензент десь є» — покажи
-скриншотом, де саме.
+Сценарій 4: **More → Review History** показує вікно **"Review History — Reviewed"** з кожним
+полем і рішенням по ньому (дата входу в процес — лише в Timeline: «Lead was submitted for
+review …») — і ім'я рецензента підписане в **кожному** рядку («by ⟨ім'я⟩»), не лише в Timeline.
+Якщо в тебе інакше — це і є розбіжність, кейс FAIL, в **Actual Result** обидва факти, у звіті про
+дефекти — різниця з тим, що описано тут. Не пиши «рецензент десь є» — покажи скриншотом, де саме.
 
 **16.9.** Лід `RV5-Order` (`Web Download`, `150000`, `Germany`): у черзі — процес
 `WF_General_Screening`, рецензент User C через Others; у черзі User B нема, процес HV до нього

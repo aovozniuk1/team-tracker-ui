@@ -83,7 +83,7 @@ scratch**.
 1. **Вручну.** Відкриваєш запис (угоду, наприклад), гортаєш до розділу **Connected Records**,
    натискаєш **Add New**, обираєш team module і створюєш у ньому запит. Новий запис автоматично
    пов'язаний з угодою.
-2. **Workflow rule.** Звичайне правило з миттєвою дією **Create connected records**: при
+2. **Workflow rule.** Звичайне правило з миттєвою дією **Create Connected Record**: при
    спрацюванні воно створює запис у вибраному team module, уже пов'язаний із записом, на якому
    правило спрацювало.
 
@@ -101,7 +101,7 @@ scratch**.
 |---|---|---|
 | зв'язок | поле вказує на один запис | запис може мати багато зв'язаних записів |
 | хто налаштовує | адміністратор, заздалегідь, як поле | користувач, будь-коли, з картки |
-| автоматичне створення | workflow створити не може | workflow створює (**Create connected records**) |
+| автоматичне створення | workflow створити не може | workflow створює (**Create Connected Record**) |
 | як виглядає | поле у формі | розділ у картці запису |
 
 ## 13.4. Connected workflows
@@ -253,7 +253,7 @@ Components, Unused Items) — документ цих полів не опису
    спрацює в момент, коли угода *стала* `Closed Won`, а не на кожне наступне редагування закритої
    угоди. З Repeat кожне редагування такої угоди створювало б новий запис Onboarding.
 4. Умова: **Stage** `is` `Closed Won`.
-5. **Instant Actions** → **Create connected records**. Вікно дії питає:
+5. **Instant Actions** → **Create Connected Record**. Вікно дії питає:
    **Module** (`Onboarding`), **Layout** (`Standard`, єдиний), назву нового запису (наприклад,
    `Onboarding for closed deal`) і власника — **Onboarding Owner** з вибором **Users** та готовим
    варіантом **Logged In User** («The user who initiates the Record Act…») поруч із конкретним
@@ -280,7 +280,7 @@ Components, Unused Items) — документ цих полів не опису
 
 5. **Кейс 1.** Кого сповіщати: у тріалі «Sales Team» — це конкретні люди (наприклад, User B і
    User C) або адреса. Потрібен шаблон листа; якщо підходящого нема, створи його заздалегідь
-   (**Setup → Customization → Templates → Email Templates**) з темою на кшталт `Product demo
+   (**Setup → Customization → Templates**, вкладка **Email**) з темою на кшталт `Product demo
    completed`.
 6. **Кейс 3.** Тригер у Training, дія **Update Connected Record** оновлює **Account Type** в
    Accounts. Вікно дії дозволяє обрати Accounts прямо в полі **Module** (пошуком), не додаючи модуль
@@ -442,7 +442,7 @@ Connected Records.
 г) те саме, що б), але connected workflow не опубліковано, а лише збережено.
 
 **13.3.** Знайди помилки. Колега налаштував: правило для Deals — `Create or Edit`, умова `Stage is
-Closed Won`, Repeat увімкнений, дія **Create connected records** → Onboarding; у connected workflow
+Closed Won`, Repeat увімкнений, дія **Create Connected Record** → Onboarding; у connected workflow
 для Deals — ще тригер «запис змінено», критерій `Stage is Closed Won`, дія — створити connected record
 в Onboarding. Скільки записів Onboarding отримає угода, яку створили в `Qualification`, потім
 закрили, а потім двічі виправили в ній опис? Що виправити?
@@ -456,7 +456,7 @@ Create New Module → Team Modules** три team modules: `Product Demo`, `Onboa
 - ручний: у будь-якій угоді в розділі **Connected Records** натисни **Add New** і створи пов'язаний
   запит у Product Demo;
 - правилом: **Setup → Automation → Workflow Rules**, нове правило для Deals, що спрацьовує, коли
-  угоду відредагували так, що `Stage is Closed Won`; миттєва дія **Create connected records** — запис
+  угоду відредагували так, що `Stage is Closed Won`; миттєва дія **Create Connected Record** — запис
   у модулі Onboarding.
 
 Поясни, як ти виставив Repeat і чому.
@@ -530,7 +530,7 @@ workflow прибрати кейс Closed Won → Onboarding (або навпа�
 - Ручний зв'язок: у **Connected Records** угоди — запис Product Demo; у самому записі видно угоду.
 - Правило: **Module** `Deals`; **Record action** → `Edit` (`Any field gets modified` або `Specific
   field(s) gets modified` → **Stage**); Repeat **знятий**; умова `Stage is Closed Won`; **Instant
-  Actions** → **Create connected records** → модуль `Onboarding`, layout, власник (і назва запису,
+  Actions** → **Create Connected Record** → модуль `Onboarding`, layout, власник (і назва запису,
   якщо форма її просить).
 
 Repeat знятий, бо онбординг потрібен один раз — у момент, коли угода *стала* `Closed Won`. З Repeat
@@ -591,7 +591,7 @@ workflow — коли передач кілька і їх треба бачит�
 - [ ] називаєш п'ять профілів team module і що може кожен;
 - [ ] пояснюєш, чому з угоди не можна зробити lookup на team module і що замість цього дають
   connected records;
-- [ ] створюєш connected record вручну і правилом **Create connected records**;
+- [ ] створюєш connected record вручну і правилом **Create Connected Record**;
 - [ ] знаєш, що видалення connected record прибирає тільки зв'язок;
 - [ ] описуєш тригери й дії connected workflow і що змінює режим `Current Records`;
 - [ ] пам'ятаєш обмеження «один connected workflow на primary module» і «лише записи, створені після

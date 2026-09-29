@@ -116,8 +116,8 @@ Not Clicked, Not Replied, Opened Not Replied). Уже зайняту під ци
 Одиниці: хвилини, години, дні, місяці (рахується весь час) і робочі дні чи робочі години (за
 налаштуваннями Business Hours організації).
 
-Звідси важлива поправка до документа. Він пише для гілки Opened «1 day after enrollment», але зараз
-довідка Zoho пояснює інакше: день рахується від **відкриття** листа. Відкрив через дві години —
+Звідси й формулювання документа для гілки Opened — «1 day after previous Email is Opened»: день
+рахується від **відкриття** листа. Відкрив через дві години —
 наступний лист за добу після цього, а не за добу після включення.
 
 ### Канали й обмеження
@@ -144,7 +144,7 @@ Not Clicked, Not Replied, Opened Not Replied). Уже зайняту під ци
 
 ### Як запис входить
 
-- **Вручну:** на сторінці запису **⋯** → **Enroll to Cadences** (пункт відкривається наведенням
+- **Вручну:** на сторінці запису **⋯** → **Enroll to Cadence** (пункт відкривається наведенням
   курсору, не кліком) → у вікні **Select Cadences** обрати каденцію → **Enroll**; так само масово зі
   списку модуля: виділити записи → **Actions** → **Cadences** → **Enroll** → те саме вікно.
 - **Через представлення:** автоматично, за критерієм представлення — і одразу для щойно створеного
@@ -199,7 +199,7 @@ Resume/Restart; що запропонує тріал, перевір. Якщо �
 каденції до трьох разів — щоб не зациклити.
 
 На каденції з аудиторією Manually enrolled Leads повторне
-включення зупиненого запису (**Enroll to Cadences** → та сама каденція) відкриває вікно **"Choose to
+включення зупиненого запису (**Enroll to Cadence** → та сама каденція) відкриває вікно **"Choose to
 resume or restart progress"** з текстом *"Selected Lead is already enrolled but in stopped state.
 Select whether you want to resume from where they left or restart from the beginning."* і кнопками
 **Cancel / Restart / Resume**. При Resume: запис продовжує з того самого кроку, дата початку
@@ -208,7 +208,7 @@ resumed in Cadence ⟨назва⟩ by ⟨користувач⟩"*. Resume/Rest
 довідки про поетапне ввімкнення.
 
 Важливе уточнення для каденції на представленні: вікно **Select Cadences** (і в **Enroll to
-Cadences**, і в масовому **Actions → Cadences → Enroll**) взагалі не
+Cadence**, і в масовому **Actions → Cadences → Enroll**) взагалі не
 пропонує каденцію на представленні для повторного включення — тільки каденції з аудиторією Manually
 enrolled Leads. Для каденції на представленні запис повертається лише автоматично: коли каденція для
 запису завершилась (restart) або зупинилась (resume чи restart), одразу чи через заданий час — це
@@ -292,7 +292,7 @@ Automation**, усі чотири вмикаються автоматично. �
 
 > Вікно **Create Cadence** (поля точно як нижче), список модулів
 > (**Leads, Contacts, Accounts, Deals, Quotes, Vendors**), варіанти **Who is this for?** і форма
-> кроку-листа (**Do this / Name / To / Email Template / Reply To / From** — останні два документ не
+> кроку-листа (**Do this / Name / To / Email Template / Reply To / From** — **Reply To** документ не
 > згадує) — так виглядають у тріалі. Форми кроків-дзвінка й кроку-задачі, властивості виключення,
 > публікація й related list описані нижче, в 17.4, 17.9–17.11 та 17.14.
 
@@ -308,7 +308,7 @@ Profile.
 
 ### 1.2. Чотири шаблони листів
 
-**Setup → Customization → Templates → Email Templates**. Далі за довідкою: **+ New Template** →
+**Setup → Customization → Templates**, вкладка **Email**. Далі за довідкою: **+ New Template** →
 модуль **Leads** → **Next** → у галереї шаблонів порожній шаблон → зібрати тіло → вказати назву
 (**Name**) і тему (**Subject**) → зберегти.
 
@@ -378,7 +378,7 @@ Contacts у каденції на Leads не з'явиться.
 адреса) з приміткою: *"Sender email changed - To improve email deliverability, Zoho CRM will avoid
 sending emails from public email addresses and use our own authenticated domain."* — тобто Zoho може
 фактично надіслати лист не з твоєї адреси, а зі свого домену, заради доставлюваності; на
-налаштування кроку це не впливає. **Save**.
+налаштування кроку це не впливає. **Save and Associate**.
 
 **Крок 3. Follow-up 2A — дзвінок на Opened.** **+** біля Follow-up 1 → Call:
 
@@ -394,7 +394,7 @@ sending emails from public email addresses and use our own authenticated domain.
 робочий час і запиши його в тест-кейс на налаштування. **Save**.
 
 **Крок 4. Follow-up 2B — лист на Sent.** Ще раз **+** біля Follow-up 1 → Email: через 3 дні, реакція
-Sent, поле адреси Email, шаблон `NovaSpark – Still Interested?`, відправник — твоя адреса. **Save**.
+Sent, поле адреси Email, шаблон `NovaSpark – Still Interested?`, відправник — твоя адреса. **Save and Associate**.
 
 **Що побачиш:**
 
@@ -438,10 +438,10 @@ Follow-up 1: Email – Welcome to Your Trial (Immediately)
 Якщо форма запропонує затримку для нових записів — не став: документ її не передбачає. **Next**.
 
 **Крок 2. Follow-up 1 — лист.** **Add Follow-up** → Email: Immediately after enrollment; поле адреси
-Email; шаблон `NovaSpark – Welcome to Your Trial`; відправник — твоя адреса. **Save**.
+Email; шаблон `NovaSpark – Welcome to Your Trial`; відправник — твоя адреса. **Save and Associate**.
 
 **Крок 3. Follow-up 2A — лист на Opened.** **+** біля Follow-up 1 → Email: через 1 день; реакція
-Opened; поле адреси Email; шаблон `NovaSpark – Explore Key Features`; відправник. **Save**.
+Opened; поле адреси Email; шаблон `NovaSpark – Explore Key Features`; відправник. **Save and Associate**.
 
 **Крок 4. Follow-up 2B — задача на Bounced.** **+** біля Follow-up 1 → Task:
 
@@ -449,15 +449,15 @@ Opened; поле адреси Email; шаблон `NovaSpark – Explore Key Fea
 |---|---|
 | коли | Immediately |
 | реакція | Bounced |
-| тема задачі | `Verify and correct email address – bounced lead` |
-| кому | User C |
-| строк | 1 день після створення задачі |
+| тема задачі (**Subject**) | `Verify and correct email address – bounced lead` |
+| кому (**Task Owner**) | User C |
+| строк (**Due Date**) | **Trigger Date** plus `1` day(s) |
 | пріоритет | `High` |
 
-**Save**.
+**Save and Associate**.
 
 **Крок 5. Follow-up 2C — лист на Sent.** **+** біля Follow-up 1 → Email: через 3 дні; реакція Sent;
-поле адреси Email; шаблон `NovaSpark – Still Interested?`; відправник. **Save**. Це запасна гілка для
+поле адреси Email; шаблон `NovaSpark – Still Interested?`; відправник. **Save and Associate**. Це запасна гілка для
 тих, хто отримав лист, але нічого не зробив.
 
 **Крок 6. Follow-up 3A — дзвінок на Clicked.** **+** біля Follow-up 2A → Call:
@@ -474,7 +474,7 @@ Opened; поле адреси Email; шаблон `NovaSpark – Explore Key Fea
 
 **Крок 7. Follow-up 3B — задача на Sent.** **+** біля Follow-up 2A → Task: через 2 дні після Follow-up
 2A; реакція Sent; тема `Manual outreach – lead opened welcome email but did not engage further`;
-кому User C; пріоритет `Normal`. **Save**.
+кому User C; пріоритет `Normal`. **Save and Associate**.
 
 **Що побачиш:** на сторінці — дерево з шести кроків, як на схемі вище. Скриншот.
 
@@ -539,11 +539,11 @@ Existing Records** — це і є пряма відповідь на питан�
 
 | гілка | подія | як викликати | скільки чекати |
 |---|---|---|---|
-| 1: Follow-up 1 | включення | **Enroll to Cadences** на сторінці ліда | одразу |
-| 1: 2A | Opened | відкрити лист у справжній скриньці ліда | 1 день від відкриття |
+| 1: Follow-up 1 | включення | **Enroll to Cadence** на сторінці ліда | одразу |
+| 1: 2A | Opened | відкрити лист у справжній скриньці ліда (у пісочниці — в **Email Outbox**) | 1 день від відкриття |
 | 1: 2B | Sent | нічого не робити | 3 дні |
 | 2: Follow-up 1 | лід з'явився в представленні | створити лід з `Web Download` | одразу |
-| 2: 2A | Opened | відкрити лист | 1 день від відкриття |
+| 2: 2A | Opened | відкрити лист (у пісочниці — в **Email Outbox**) | 1 день від відкриття |
 | 2: 3A | Clicked у 2A | клікнути посилання в листі 2A | 1 день від кліку |
 | 2: 3B | Sent у 2A | не клікати | 2 дні |
 | 2: 2B | Bounced | адреса, якої не існує | одразу після повернення листа |
@@ -552,14 +552,16 @@ Existing Records** — це і є пряма відповідь на питан�
 | виключення 2 | випав з представлення | змінити Lead Source | одразу |
 
 З таблиці видно головне: деякі гілки вимагають справжньої скриньки, а деякі — днів очікування.
-Це планують заздалегідь.
+Це планують заздалегідь. У пісочниці справжньої доставки немає, але відкриття листа в
+**Setup → Data Administration → Email Outbox** позначає його Opened на записі (у тріалі це
+підтверджено), тож гілки на Opened провокуються й там; Bounced і Replied без доставки не виникають.
 
 ### Пастки, які варто знати до тестів
 
 - **Відкриття фіксується не завжди.** Не зафіксувала система відкриття — лист лишається sent, і
   гілка Opened не спрацює. Для тесту відкривай лист у звичайному поштовому клієнті й дозволяй
   показ зображень (відкриття зазвичай відстежують саме через них — загальна практика поштового
-  трекінгу).
+  трекінгу). У пісочниці лист відкривай в **Email Outbox** — там відкриття фіксується.
 - **Bounced чи Failed.** Неіснуюча адреса може дати не гілку Bounced, а статус Failed для запису —
   FAQ Zoho згадує неправильну адресу серед причин збою кроку. Обидва результати фіксуй як є.
 - **Відправник з Gmail.** Відповіді не відстежуються — у A19 гілки Replied нема, але пам'ятай.
@@ -663,7 +665,7 @@ Existing Records** — це і є пряма відповідь на питан�
 **17.3.** Підготовка: переконайся в **Setup → General → Users**, що User B і User C активні, і що
 **Setup → Automation → Cadences** доступний.
 
-**17.4.** У **Setup → Customization → Templates → Email Templates** створи чотири шаблони для модуля
+**17.4.** У **Setup → Customization → Templates** (вкладка **Email**) створи чотири шаблони для модуля
 Leads з різними темами: `NovaSpark – Webinar Thank-You` («Thank you for attending our webinar»),
 `NovaSpark – Welcome to Your Trial` («Welcome to NovaSpark – here is how to get started»),
 `NovaSpark – Explore Key Features` («Discover what NovaSpark can do for your team»), `NovaSpark –
@@ -688,7 +690,7 @@ CRM. Зроби скриншот дерева й опублікуй.
 - Follow-up 1 — лист одразу, шаблон `NovaSpark – Welcome to Your Trial`;
 - 2A — лист через 1 день на Opened, шаблон `NovaSpark – Explore Key Features`;
 - 2B — задача одразу на Bounced: тема `Verify and correct email address – bounced lead`, User C,
-  строк 1 день після створення, пріоритет `High`;
+  строк **Trigger Date** plus 1 day(s), пріоритет `High`;
 - 2C — лист через 3 дні на Sent, шаблон `NovaSpark – Still Interested?`;
 - 3A (від 2A) — дзвінок через 1 день на Clicked: User B, мета `Demo`, порядок денний `Lead clicked
   a link in the feature highlight email — high intent. Schedule a product demo call.`;
@@ -803,7 +805,7 @@ view criteria. Примітки: (1) лід, що вже `Lost Lead` у моме
 
 | що | як викликати | чекати | доказ |
 |---|---|---|---|
-| К1 F1 | лід з реальною адресою → **Enroll to Cadences** | — | related list **Cadences**; лист у скриньці |
+| К1 F1 | лід з реальною адресою → **Enroll to Cadence** | — | related list **Cadences**; лист у скриньці |
 | К1 2A* | відкрити лист-подяку | 1 день від відкриття | запланований дзвінок User B |
 | К1 2B | не відкривати | 3 дні | лист «We would love to hear from you» |
 | К2 F1 | лід `Web Download` з реальною адресою | — | лід у представленні; related list; лист |
@@ -815,7 +817,10 @@ view criteria. Примітки: (1) лід, що вже `Lost Lead` у моме
 | виключення 1 | Lead Status → `Lost Lead` | — | статус у related list; заплановані кроки скасовано |
 | виключення 2 | Lead Source → інше значення | — | статус у related list |
 
-Зірочкою позначено гілки, які без справжньої скриньки не перевірити.
+Зірочкою позначено гілки, які без справжньої скриньки не перевірити, — це про справжню доставку. У
+пісочниці відкриття листа в **Setup → Data Administration → Email Outbox** позначає його Opened на
+записі, тож гілки на Opened (К1 2A, К2 2A) перевіряються й там; Bounced і Replied у пісочниці не
+виникають, а Clicked так не перевірено.
 
 **17.11.** Вимкнути **Manage Automation** (інакше ввімкнуться всі дозволи каденцій і доступ до інших
 автоматизацій); увімкнути **View**, **Enroll**, **Un-enroll** для каденцій; **Manage** — вимкнути.

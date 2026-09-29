@@ -42,7 +42,7 @@ Owner, нічого не доведе.
 |---|---|
 | **Rule Name**, **Description** | ім'я за правилом компанії `oz_<назва>` |
 | layout (вгорі редактора) | конкретні layout або **All Layouts**; правило діє на задачі проєктів, що працюють на вибраних layout. На один task layout — до 20 правил |
-| **Execution Condition** | **Based on User action** або **Based on Date & Time** |
+| **This rule will be executed** (розділ WHEN) | **Based on User action** або **Based on Date & Time** |
 | **Execute On** (для User action) | подія, що запускає правило, у вигляді речення «When a Task …»: **is Created**, **is Updated** (any fields або лише вибрані поля), **is Commented on**, **is Deleted**, **Document is attached** (звір цей список зі своїм екраном) |
 | умови (Condition 1, 2…; нову додає **Add Condition**) | **Add Criteria** → поле, оператор, значення; в одній умові може бути кілька критеріїв |
 | **Add Action** | **Update Field**, **Associate Webhook**, **Associate Custom Function**, **Associate Email Alert** |
@@ -100,13 +100,13 @@ Select a different layout as the Date and time based workflows cannot be applied
 
 ```
 [On | Before | After] [n] Days from [дата] executes [at a Specific Time] [09:00],
-Every [n] [Days | Weeks | Months] up to [n] time(s)
+[Once | Daily | Weekly | Monthly | Every]; для Every — [n] [Days | Weeks | Months] up to [n] time(s)
 ```
 
-У тріалі дата — **Start Date, Due Date або Completion Date** (не Created Date). Повтор — це
-ОДИН елемент керування «Every [n] [Days/Weeks/Months] up to [n] time(s)», а не вибір із готових назв
-Once/Daily/Weekly/Monthly: «один раз» отримуєш, коли `up to` = 1, незалежно від того, яку одиницю
-поставив в Every. Обмеження повторів рахується для кожної задачі окремо, а не для правила загалом.
+У тріалі дата — **Start Date, Due Date або Completion Date** (не Created Date). Повтор — список
+**Once**, **Daily**, **Weekly**, **Monthly**, **Every**; за замовчуванням стоїть **Every** («Every [n]
+[Days/Weeks/Months] up to [n] time(s)»). «Один раз» — це **Once** (або Every з `up to` = 1). Обмеження
+повторів рахується для кожної задачі окремо, а не для правила загалом.
 
 **Що ще каже довідка:**
 
@@ -197,8 +197,8 @@ Blueprint. Шаблон ще можна обрати в нагадуванні (
 
 **Одержувачі листа.** У задачі Projects нема поля «Assignee» — власника задачі показує поле **Owner**. У
 редакторі alert розділ одержувачів підписаний **«Notify users associated with the
-Task»** і складається з ОКРЕМИХ прапорців — **Task Owner**, **Created By**, **Followers**, **Associate
-Teams** — познач лише потрібний, а не всі одразу. Нижче є другий розділ, **«Notify users associated with
+Task»** і складається з ОКРЕМИХ прапорців — **Task Owner**, **Created By**, **Followers**, **Associated
+Team** — познач лише потрібний, а не всі одразу. Нижче є другий розділ, **«Notify users associated with
 the Project»** (Portal Users, Client Users, Project Owner, Created By), і поле вільного тексту для
 конкретних ролей/адрес. Для листа власнику задачі познач саме **Task Owner**.
 
@@ -274,8 +274,8 @@ Alert**: `oz_Due Soon Alert`, той самий layout, шаблон `oz_Due Soo
 | **Rule Name** | `oz_Auto-Priority Based on Deadline` |
 | **Description** | `Sets Priority = High and notifies the owner 3 days before Due Date` |
 | layout (вгорі) | layout навчального проєкту |
-| **Execution Condition** | **Based on Date & Time** |
-| речення часу | `Before` · `3` · `Days` from `Due Date` executes `at a Specific Time` · `09:00` · `Every` `1` `Days` `up to` `1` `time(s)` |
+| **This rule will be executed** | **Based on Date & Time** |
+| речення часу | `Before` · `3` · `Days` from `Due Date` executes `at a Specific Time` · `09:00` · `Once` |
 | критерії (усі разом) | `Task End Date` `Scheduled`; Task Status `Is Not` `Closed` |
 | дії | **Update Field** → Priority = `High`; **Associate Email Alert** → `oz_Due Soon Alert` |
 | **Execute the next workflow rule** | не позначати |
@@ -333,9 +333,9 @@ layout проєкту) перетягни з **New Fields** тип **Pick List**
 |---|---|
 | **Rule Name** | `oz_Planning Reminder 5 Days Before Start` |
 | layout (вгорі) | layout навчального проєкту (у ньому є `Reminder Sent?`) |
-| **Execution Condition** | **Based on Date & Time** |
+| **This rule will be executed** | **Based on Date & Time** |
 | речення часу | `Before` · `5` · `Days` from `Start Date` executes `at a Specific Time` · `09:00` · `Once` |
-| критерії (усі разом) | Start Date `Is Not Empty`; Status `Is Not` `Closed`; `Reminder Sent?` `Is` `No` |
+| критерії (усі разом) | `Task Start Date` `Scheduled`; Task Status `Is Not` `Closed`; `Reminder Sent?` `Is` `No` |
 | дії | **Associate Email Alert** → `oz_Planning Reminder Alert`; **Update Field** → `Reminder Sent?` = `Yes` |
 
 **Крок 4. Тестові дані** (крок 5 завдання): задача `Planning reminder test`, Start Date — у майбутньому,
@@ -362,7 +362,7 @@ layout проєкту) перетягни з **New Fields** тип **Pick List**
 |---|---|
 | **Rule Name** | `oz_Bulk Field Change on Task Creation` |
 | layout (вгорі) | layout проєкту (у ньому є `Workstream`) |
-| **Execution Condition** | **Based on User action** |
+| **This rule will be executed** | **Based on User action** |
 | **Execute On** | лише створення: **is Created** |
 | критерій | Task Name `Contains` `Campaign` |
 | дії | **Update Field**: `Workstream` = `Marketing`; Completion Percentage = `0`; Priority = `High` |
@@ -773,9 +773,9 @@ Overall Result: All tested Blueprint and Workflow rules have passed QA.
 |---|---|
 | Rule Name | `oz_Auto-Priority Based on Deadline` |
 | layout | layout навчального проєкту |
-| Execution Condition | Based on Date & Time |
+| This rule will be executed | Based on Date & Time |
 | час | Before 3 Days from Due Date, at a Specific Time 09:00, Once |
-| критерії | Due Date `Is Not Empty`; Status `Is Not` `Closed` |
+| критерії | `Task End Date` `Scheduled`; Task Status `Is Not` `Closed` |
 | дії | Priority = `High`; Email Alert `oz_Due Soon Alert` |
 | стан | увімкнене |
 
@@ -804,9 +804,9 @@ Overall Result: All tested Blueprint and Workflow rules have passed QA.
 | поле layout | `Reminder Sent?`: Pick List `No`, `Yes`, за замовчуванням `No` |
 | Rule Name | `oz_Planning Reminder 5 Days Before Start` |
 | layout | layout навчального проєкту |
-| Execution Condition | Based on Date & Time |
+| This rule will be executed | Based on Date & Time |
 | час | Before 5 Days from Start Date, at a Specific Time 09:00, Once |
-| критерії | Start Date `Is Not Empty`; Status `Is Not` `Closed`; `Reminder Sent?` `Is` `No` |
+| критерії | `Task Start Date` `Scheduled`; Task Status `Is Not` `Closed`; `Reminder Sent?` `Is` `No` |
 | дії | Email Alert `oz_Planning Reminder Alert` (шаблон `Planning Reminder`); `Reminder Sent?` = `Yes` |
 
 Очікування на `Planning reminder test` (Start Date = сьогодні + 5, тестовий час): один лист, поле = `Yes`,
@@ -835,7 +835,7 @@ P6 Old task: a task created before the field was added
 | поле layout | `Workstream`: Pick List `Marketing`, `Operations`, `QA` |
 | Rule Name | `oz_Bulk Field Change on Task Creation` |
 | layout | layout проєкту, створеного з нуля |
-| Execution Condition | Based on User action |
+| This rule will be executed | Based on User action |
 | Execute On | створення (**is Created**) |
 | критерій | Task Name містить `Campaign` |
 | дії | `Workstream` = `Marketing`; Completion Percentage = `0`; Priority = `High` |
@@ -912,8 +912,9 @@ B7 Neighbour rule: "QA Campaign checks" in a project where a create-rule for "QA
 4. **«Required field checks (e.g., Title, attachments)».** У контент-процесі немає поля Title і немає жодної
    перевірки вкладень — повідомлення лише показують текст. Звіт хвалить перевірку, якої конфігурація не
    робить.
-5. **«Final email alert to reporter … verified».** З одним користувачем Reporter, виконавець і тестувальник —
-   одна людина; перевірити, що лист пішов саме Reporter, неможливо без другого користувача.
+5. **«Final email alert to reporter … verified».** Серед одержувачів task-alert-а Reporter немає взагалі
+   (є Task Owner, Created By, Followers, Associated Team і користувачі); а з одним користувачем
+   перевірити, кому саме пішов лист, неможливо без другого користувача.
 6. **«No update triggered for tasks with due dates beyond 3 days — expected behavior».** Для правила за
    розкладом це лише «ще не настав момент»: такі задачі оновляться пізніше, за 3 дні до своїх Due Date.
    Висновок залежить від часу спостереження, а його не вказано.

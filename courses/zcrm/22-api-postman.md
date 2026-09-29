@@ -235,8 +235,8 @@ Validity документації v8 — `INVALID_OAUTHTOKEN`. Записуй т
 - B: `GET {{api-domain}}/crm/v8/settings/fields?module=Leads`
 
 Перевір A: масив `modules` містить Leads, Contacts, Accounts, Deals і Tasks, у кожного є `api_name`,
-`id` і прапорець редагованості. Завдання називає його `is_editable`, а документація v8 — `editable`.
-Запиши, який ключ прийшов; якщо `editable` — це розбіжність у завданні, а не дефект.
+`id` і прапорець редагованості `editable` (так його називають і завдання, і документація v8; ключа
+`is_editable` немає). Запиши, який ключ прийшов.
 
 Перевір B: масив `fields`; у `Last_Name` — `system_mandatory: true`. Завдання очікує `true` і для
 `Company`, але документація v8 каже інше: системно обов'язковий для Leads лише `Last_Name`, а в
@@ -742,8 +742,8 @@ Auth** — вони не для API CRM.
 **7. Повторний прогін без прибирання.** Дублікати лідів, upsert відповідає `update`, пошук знаходить
 двох Mueller.
 
-**8. «Дефект» на розбіжність завдання з документацією.** Якщо прийшли `editable` замість
-`is_editable`, 201 замість 200 чи `Company` з `system_mandatory: false`, продукт поводиться за
+**8. «Дефект» на розбіжність завдання з документацією.** Якщо прийшли 201 замість 200 чи
+`Company` з `system_mandatory: false`, продукт поводиться за
 документацією, а помиляється очікування в завданні.
 
 **9. Токени в експорті чи на скриншоті.** Environment експортовано з токенами, скриншот обміну
@@ -833,7 +833,7 @@ Accounts, Deals і Tasks; встанови десктопний Postman верс
    - Task 1: `GET {{api-domain}}/crm/v8/org` — HTTP 200; є `company_name`, `primary_email`,
       `currency`, `time_zone`, `license_details`; що з `license_details` підтверджує тріал Enterprise?
    - Task 2: A `GET {{api-domain}}/crm/v8/settings/modules` — Leads, Contacts, Accounts, Deals,
-      Tasks з `api_name`, `id` і прапорцем редагованості (завдання називає його `is_editable`);
+      Tasks з `api_name`, `id` і прапорцем редагованості `editable`;
       B `GET {{api-domain}}/crm/v8/settings/fields?module=Leads` — перевір `system_mandatory` у
       `Last_Name` і `Company`, запиши `data_type` для Email, Phone, Description.
    Для кожної розбіжності з завданням скажи, дефект це чи ні і чому.
@@ -988,7 +988,7 @@ if (pm.response.code === 200) { pm.environment.set("access-token", pm.response.j
 **22.4.** Task 1: HTTP 200, масив `org` з п'ятьма ключами; про редакцію й тріал свідчать ключі
 `license_details` (у прикладі документації — `paid`, `paid_type`, `trial_type`, `trial_expiry`
 тощо) — випиши фактичні значення. Task 2 A: п'ять модулів з `api_name` і `id`; прапорець
-редагованості за документацією називається `editable` — якщо прийшов він, це розбіжність у завданні.
+редагованості — `editable`, як у завданні й документації v8.
 Task 2 B: `Last_Name` — `system_mandatory: true`; `Company` за документацією — `false` (системно
 обов'язковий лише `Last_Name`, а обов'язковість на рівні макета метадані не показують) — розбіжність
 у завданні, не дефект. `data_type` у прикладі документації: Email — `email`, Phone — `phone`,
@@ -1082,8 +1082,8 @@ Assignment` (.json) і файл environment без токенів (переві�
 публічні, одне повідомлення ментору.
 
 **22.15.**
-   1. Розбіжність у завданні: документація v8 називає ключ `editable`. У звіті — спостереження і
-      рекомендація виправити очікування.
+   1. Ні дефект, ні розбіжність: і завдання, і документація v8 називають ключ `editable` — це
+      очікувана відповідь, у звіті окремо нічого не пишеш.
    2. Дефект продукту: відповідь каже «success», а дані не збереглися — суперечність документованій
       поведінці. Bug Report з обома відповідями (PUT і GET).
    3. Проблема середовища (неповний список скоупів у завданні): документація Search вимагає

@@ -221,9 +221,9 @@ Zoho Sheet і передаються ментору публічним поси�
 
 1. **User B і User C активні.** Відкрий **Setup → General → Users**. Якщо їх ще немає: у тріалі Zoho
    One користувачів додають в **Admin Panel → User Management → Users → Add User** (кнопка + New User
-   у CRM лише відкриває цю сторінку), потім перевіряють, що їм призначено CRM, і задають їм Role і
-   Profile в **Setup → General → Users**. На адреси User B і User C прийдуть листи від Kiosk 2, тож
-   бери скриньки, які ти можеш відкрити.
+   у CRM відкриває не її, а **Applications → CRM** з панеллю **Assign CRM to User(s)**), потім
+   перевіряють, що їм призначено CRM, і задають їм Role і Profile в **Setup → General → Users**. На
+   адреси User B і User C прийдуть листи від Kiosk 2, тож бери скриньки, які ти можеш відкрити.
 2. **У Leads є щонайменше п'ять записів для тестів.** Якщо менше — створи вручну. Давай їм
    упізнавані імена (`A20 Lead 01` … `A20 Lead 05`) і заповнюй **Lead Status** та **Description**
    відомими значеннями — тоді зміну після кіоска видно одразу.
@@ -290,9 +290,9 @@ name can't contain the following special character: _». Тому для Kiosk N
 | # | елемент | налаштування |
 |---|---|---|
 | 1 | Text (Display Element) | `Complete the fields below to log your call outcome. This will update the lead record immediately.` |
-| 2 | Field — Single Line | Label `Lead Name`; увімкни Merge from module; `#` → Current Record → **Lead Name**; Read Only |
-| 3 | Field — Pick List (Local) | Label `Update Lead Status`; Mandatory; значення вручну: `Attempted to Contact`, `Contact in Future`, `Contacted`, `Not Contacted`, `Pre-Qualified`, `Not Qualified` |
-| 4 | Field — Multi-line | Label `Call Notes`; Mandatory |
+| 2 | Field — Single Line | **Field Name** `Lead Name`; увімкни Merge from module; `#` → Current Record → **Lead Name**; Read Only |
+| 3 | Field — Pick List (**Pick List Type**: Local) | **Field Name** `Update Lead Status`; Mandatory; значення вручну: `Attempted to Contact`, `Contact in Future`, `Contacted`, `Not Contacted`, `Pre-Qualified`, `Not Qualified` |
+| 4 | Field — Multi-line | **Field Name** `Call Notes`; Mandatory |
 
 Додай дві кнопки:
 
@@ -316,9 +316,10 @@ name can't contain the following special character: _». Тому для Kiosk N
 
 | параметр | значення |
 |---|---|
-| **Action Name** | `Update_Lead_Status` |
+| **Field Update Name** | `Update_Lead_Status` |
 | **Record Type** | Current Record (лід, з якого відкрили кіоск) |
-| поле | **Lead Status** ← значення поля `Update Lead Status` з екрана `Call_Outcome_Entry` |
+| **Field to Update** | **Lead Status** |
+| **New Value** | значення поля `Update Lead Status` з екрана `Call_Outcome_Entry` |
 
 Одразу після неї, на тій самій гілці, ще **+** → **Action** типу **Add Note**:
 
@@ -420,7 +421,7 @@ Kiosk 1 маленький, але чіпає справжні дані, і ри
 
 | TC ID | Title | Preconditions | Steps | Expected Result | Actual Result | Status | Evidence |
 |---|---|---|---|---|---|---|---|
-| A20-K1-01 | Log Call Outcome updates Lead Status and Description | Lead `A20 Lead 01`: Lead Status = Not Contacted, Description = `Initial note`; button Log Call Outcome available to Administrator | 1. Open the lead. 2. Click Log Call Outcome. 3. Check Lead Name. 4. Select `Contacted`, enter `Called, interested in Q4 roles`. 5. Click Save & Close. 6. Click Close. 7. Reload the lead. | Step 3: Lead Name = full name of the lead, read-only. Step 5: Confirmation screen with the success text. Step 7: Lead Status = Contacted, Description = `Called, interested in Q4 roles` | | Pass / Fail / Blocked | A20-K1-01-*.png |
+| A20-K1-01 | Log Call Outcome updates Lead Status and adds a Note | Lead `A20 Lead 01`: Lead Status = Not Contacted, Description = `Initial note`; button Log Call Outcome available to Administrator | 1. Open the lead. 2. Click Log Call Outcome. 3. Check Lead Name. 4. Select `Contacted`, enter `Called, interested in Q4 roles`. 5. Click Save & Close. 6. Click Close. 7. Reload the lead. | Step 3: Lead Name = full name of the lead, read-only. Step 5: Confirmation screen with the success text. Step 7: Lead Status = Contacted; Notes has a new note `Called, interested in Q4 roles`; Description still `Initial note` | | Pass / Fail / Blocked | A20-K1-01-*.png |
 
 ## 19.9. Типові помилки
 
@@ -647,9 +648,10 @@ Call_Outcome_Entry
 **19.8.** Послідовність: у Kiosk Studio **Publish** (якщо з'явиться пропозиція розмістити — можна
 закрити); **Setup → Customization → Modules and Fields** → **Leads** → вкладка **Buttons** →
 **Create New Button**: Button Name `Log Call Outcome`; Add Description `Opens the post-call update
-kiosk for this lead.`; Define action **Kiosk**; Select Page **In Record**; Configured Kiosk **Choose**
-→ `LC_QuickUpdate`; Button Accessibility: Select Profile(s) — Administrator і профілі User B та User C
-→ **Save**. Перевірка: картка будь-якого ліда показує **Log Call Outcome**; кнопка відкриває кіоск,
+kiosk for this lead.`; Define action **Kiosk**; Select Page **In Record**; Select Position **Details**;
+Configured Kiosk **Choose** → `LC_QuickUpdate`; Button Accessibility: Select Profile(s) —
+Administrator і профілі User B та User C → **Save**. Перевірка: картка будь-якого ліда показує
+**Log Call Outcome**; кнопка відкриває кіоск,
 Lead Name = ім'я ліда. Скриншоти: дерево кіоска в Kiosk Studio, кнопка на картці ліда.
 
 **19.9.** Помилки і їхні прояви:
@@ -668,17 +670,17 @@ Lead Name = ім'я ліда. Скриншоти: дерево кіоска в K
 
 | TC ID | Title | Preconditions | Steps | Expected Result |
 |---|---|---|---|---|
-| A20-K1-01 | Status and notes are saved | Lead with Lead Status = Not Contacted | Open kiosk, pick `Contacted`, enter notes, Save & Close, reload lead | Lead Status = Contacted, Description = entered notes |
+| A20-K1-01 | Status and notes are saved | Lead with Lead Status = Not Contacted | Open kiosk, pick `Contacted`, enter notes, Save & Close, reload lead | Lead Status = Contacted; a new Note with the entered notes; Description unchanged |
 | A20-K1-02 | Lead Name shows the current record | Two leads A and B | Open kiosk from A, then from B | Lead Name = full name of A, then of B; field is read-only |
 | A20-K1-03 | Status is mandatory | Any test lead | Leave Update Lead Status empty, fill notes, click Save & Close | Kiosk does not proceed; lead unchanged |
 | A20-K1-04 | Notes are mandatory | Any test lead | Pick a status, leave Call Notes empty, click Save & Close | Kiosk does not proceed; lead unchanged |
 | A20-K1-05 | Cancel changes nothing | Lead with known status and description | Fill both fields, click Cancel | Cancelled screen; status and description unchanged |
 | A20-K1-06 | Button visible only to selected profiles | Profile P not selected in the button | Log in as a user with profile P, open a lead | No Log Call Outcome button |
-| A20-K1-07 | Description is replaced | Lead with Description = `Old text` | Run kiosk with notes `New text` | Description = `New text`; `Old text` gone — log as observation, confirm requirement |
+| A20-K1-07 | Description is not touched | Lead with Description = `Old text` | Run kiosk with notes `New text` | Description still `Old text`; `New text` is a new Note |
 | A20-K1-08 | Every status value is valid | Test lead | Run kiosk six times, one per status value | Each value appears on the lead exactly as in the Lead Status list |
 
 **19.11.** Очікуваний результат: до — значення, які ти записав; після — Lead Status = `Contact in
-Future`, Description = `Callback next Tuesday` (старий Description замінено). Екрани: Lead Name =
+Future`, у Notes — нова нотатка `Callback next Tuesday`, Description не змінився. Екрани: Lead Name =
 ім'я `A20 Lead 01`, потім Confirmation з текстом про успіх. Для користувача без профілю в кнопці —
 кнопки **Log Call Outcome** на картці немає. Два рядки таблиці: A20-K1-01 (Pass, скриншоти до/після
 і екранів) і A20-K1-06 (Pass, скриншот картки ліда без кнопки). Якщо щось розійшлося — Fail і

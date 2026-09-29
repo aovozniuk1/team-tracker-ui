@@ -189,10 +189,10 @@ Sequential із двох етапів — буде.
 Як налаштовуються дії (довідка):
 - **Update fields** → створити оновлення поля: назва, модуль, поле, значення (або **Set as Empty**)
   → **Save and Associate**; можна обрати вже створене й натиснути **Associate**.
-- **Email Notifications** → **New Alert**: назва, отримувачі (люди з запису — наприклад, власник;
-  учасники погодження; користувачі, ролі, групи), шаблон листа, адреси From і Reply To → зберегти й
-  прив'язати. Шаблон має існувати заздалегідь або бути створений по ходу; шаблони живуть у **Setup →
-  Customization → Templates → Email Templates**.
+- **Email Notifications** → **New Email Notification**: **Name**, **To** (люди з запису — наприклад,
+  власник; учасники погодження; користувачі, ролі, групи), **Email Template**; **To** і **Email Template**
+  обов'язкові → зберегти й прив'язати (**Save and Associate**). Шаблон має існувати заздалегідь або
+  бути створений по ходу; шаблони живуть у **Setup → Customization → Templates**, вкладка **Email**.
 - На погодження чи відхилення — по одному webhook і одній функції; на відхилення — до трьох листів.
 
 ### Assign Admins і Takeover
@@ -243,8 +243,8 @@ Sequential із двох етапів — буде.
 1. Ти працюєш під акаунтом із профілем Administrator.
 2. Потрібні ще двоє користувачів CRM: **User B** — основний погоджувач, **User C** — власник записів,
    який відправляє їх на погодження. Тріал CRM стартує з одним користувачем; у Zoho One їх додають
-   у **Admin Panel → User Management → Users → Add User** (кнопка **+ New User** у CRM лише відкриває
-   цю сторінку).
+   у **Admin Panel → User Management → Users → Add User** (кнопка **+ New User** у CRM відкриває не
+   її, а **Applications → CRM** з панеллю **Assign CRM to User(s)**).
 3. Переконайся, що обом призначено CRM, а в **Setup → General → Users** задані роль і профіль
    (для цього завдання підійде профіль Standard).
 4. Обидва акаунти мають бути активні й підтверджені: людина прийняла запрошення й може увійти.
@@ -265,7 +265,7 @@ Processes** відкривається. Якщо розділу нема — з�
 - подивись список процесів: якщо для Deals, Leads чи Contacts уже є процеси з твоїх експериментів,
   вони можуть перехопити записи раніше за нові;
 - для сценарію A створи шаблон листа для Deals про відхилення угоди (**Setup → Customization →
-  Templates → Email Templates**) — знадобиться для сповіщення власнику.
+  Templates**, вкладка **Email**) — знадобиться для сповіщення власнику.
 
 ## 14.6. Покроково: сценарій A — High-Value Deal Review
 
@@ -299,9 +299,13 @@ Processes** відкривається. Якщо розділу нема — з�
    `User B review`.
 5. **Final Actions → Action on Final Approval → Update fields**: створи оновлення поля
    (назва, наприклад, `Deal Stage to Needs Analysis`), поле **Stage**, значення `Needs Analysis`.
-6. **Final Actions → Action on Rejection → Email Notifications** → **New Alert**: назва, наприклад,
-   `Deal rejected - owner`; отримувач — власник запису (Record Owner); шаблон — підготовлений лист
-   про відхилення угоди. Збережи й прив'яжи.
+   Форма попереджає: *"Stage field will be updated only for records which have the selected picklist
+   value in its Pipeline/Layout."* — після A12 `Needs Analysis` є лише в pipeline **Standard**.
+6. **Final Actions → Action on Rejection → Email Notifications** → **New Email Notification**:
+   **Name**, наприклад, `Deal rejected - owner`; **To** — власник угоди (**Deal → Owner**; варіанта
+   «Record Owner» тут нема); **Email Template** — підготовлений лист про відхилення угоди (**To** і
+   **Email Template** обов'язкові; у тріалі є й зразковий шаблон Deals `Big Deal Alert`). Збережи й
+   прив'яжи (**Save and Associate**).
    *[SCREENSHOT REQUIRED: Email notification configuration]*
 7. **Record Modification Settings** етапу: **Allow approvers to edit pending approval records**
    залиш **знятим** — запис, що чекає, лишається заблокованим. **Allow users to edit rejected
@@ -338,12 +342,12 @@ Processes** відкривається. Якщо розділу нема — з�
    замість **User** можна обійти цю перевірку технічно (він
    резолвиться в того самого власника запису), але це не доводить погодження різними людьми.
    **Очікування (довідка):** під етапами з'являється **Overall approval flow**.
-5. **Overall approval flow**: **All stages are approved**, потім **Sequential**. Так User B погоджує
+5. **Overall approval flow**: **All stages are approved (Everyone)**, потім **Sequential**. Так User B погоджує
    першим, і лише після нього запис отримує адміністратор. Якщо вискочить вікно про Record
    Modification Settings — у сценарії B налаштування лишаються типовими, тож обирай варіант, що
    скидає до типових (**Discard**), і запиши, що саме пропонувало вікно.
    *[SCREENSHOT REQUIRED: the two approval stages and the Overall approval flow (All stages are
-   approved, Sequential)]*
+   approved (Everyone), Sequential)]*
 6. **Final Actions → Action on Final Approval → Update fields**: **Lead Status** = `Contacted`.
 7. **Final Actions → Action on Rejection → Update fields**: **Lead Status** = `Not Contacted`.
 8. **Record Modification Settings** етапів і **Assign Admins** — за замовчуванням.
@@ -445,7 +449,7 @@ Actual Result | Status):
 
 | TC ID | Test Flow | Steps Summary | Expected Result | Actual Result | Status (PASS / FAIL / BLOCKED) |
 |---|---|---|---|---|---|
-| TC-A-01 | A-1: Approve a Deal with Amount > 10000 | User C створює угоду з Amount `15000`; User B у **Workqueue → My Jobs → Approvals** погоджує з коментарем `Approved for review stage.` | після збереження угода заблокована й чекає погодження; після погодження **Stage** = `Needs Analysis`, запис розблоковано | … | … |
+| TC-A-01 | A-1: Approve a Deal with Amount > 10000 | User C створює угоду з Amount `15000` у pipeline **Standard**; User B у **Workqueue → My Jobs → Approvals** погоджує з коментарем `Approved for review stage.` | після збереження угода заблокована й чекає погодження; після погодження **Stage** = `Needs Analysis`, запис розблоковано | … | … |
 | TC-A-X1 | Boundary: Amount = 10000 | User C створює угоду з Amount `10000` | погодження не запускається, угода зберігається звичайно | … | … |
 
 ---
@@ -485,7 +489,7 @@ Actual Result | Status):
 | не виходить додати етап | не задано Approval Criteria |
 | нема блоку **Overall approval flow** | у правилі один етап |
 | адміністратор бачить лід одночасно з User B | **Parallel** замість **Sequential** |
-| лід погоджено одразу після User B | **At least one stage is approved** замість **All stages are approved** |
+| лід погоджено одразу після User B | **At least one stage is approved (Anyone)** замість **All stages are approved (Everyone)** |
 | Lead Status змінився до рішення адміністратора | оновлення стоїть в **Action on Approval** етапу 1, а не у фінальних діях |
 | угода на `10000` не пішла на погодження | оператор `>` строгий — так і має бути |
 | угода на `15000` не пішла на погодження | процес неактивний; інший процес Deals вище в списку забрав запис; не той **Send for Approval on** |
@@ -508,8 +512,8 @@ Actual Result | Status):
    символи.
 4. Погоджувачі: User, Role, Group, Levels, Record Owner's Manager (Role), Record Owner, User Lookup
    Field; для ролей і груп — Anyone або Everyone.
-5. Від двох етапів — Overall approval flow: At least one stage is approved або All stages are
-   approved → Parallel / Sequential.
+5. Від двох етапів — Overall approval flow: At least one stage is approved (Anyone) або All stages are
+   approved (Everyone) → Parallel / Sequential.
 6. Action on Approval етапу — на погодженні етапу; Final Actions — після остаточного погодження або
    відхилення.
 7. Типово погоджувачі не редагують запис, що чекає, а відхилений користувачі (зокрема власник)
@@ -543,12 +547,12 @@ CRM: User B (погоджувач) і User C (власник записів).*
 
 **14.3.** Правило з двома етапами: етап 1 — User B, етап 2 — Administrator. Для кожного варіанту
 **Overall approval flow** опиши, хто й коли отримає запис і після чого правило вважається
-погодженим: а) **At least one stage is approved**; б) **All stages are approved** + **Parallel**;
-в) **All stages are approved** + **Sequential**.
+погодженим: а) **At least one stage is approved (Anyone)**; б) **All stages are approved (Everyone)** + **Parallel**;
+в) **All stages are approved (Everyone)** + **Sequential**.
 
 **14.4.** Знайди помилки. Колега налаштував «Cold Call Lead Validation» так: **Send for Approval on**
 `Create or Edit Record`; етап 1 — User B з **Action on Approval: Update fields** → **Lead Status** =
-`Contacted`; етап 2 — Administrator; **Overall approval flow** — **At least one stage is approved**;
+`Contacted`; етап 2 — Administrator; **Overall approval flow** — **At least one stage is approved (Anyone)**;
 **Action on Rejection** порожній. Порівняй із вимогами (створення ліда з `Cold Call`, User B, потім
 адміністратор по черзі, після остаточного погодження `Contacted`, після відхилення `Not Contacted`).
 
@@ -575,9 +579,9 @@ approval records** не ставити; rule admins не призначати. *
 Call Lead Validation`, **Description** `Routes Cold Call leads through an approval stage before
 pipeline entry.`, **Send for Approval on** `Create Record`; у `Rule 1` критерій **Lead Source** `is`
 `Cold Call` *[SCREENSHOT REQUIRED: Criteria setup for Leads module]*; етап 1 — **User** User B, етап 2
-— **User** Administrator; **Overall approval flow** — **All stages are approved**, **Sequential**
+— **User** Administrator; **Overall approval flow** — **All stages are approved (Everyone)**, **Sequential**
 *[SCREENSHOT REQUIRED: the two approval stages and the Overall approval flow (All stages are
-approved, Sequential)]*; **Action on Final Approval** → **Update fields** → **Lead Status** =
+approved (Everyone), Sequential)]*; **Action on Final Approval** → **Update fields** → **Lead Status** =
 `Contacted`; **Action on Rejection** → **Update fields** → **Lead Status** = `Not Contacted`; Record
 Modification Settings і Assign Admins — типові. **Save**, процес активний *[SCREENSHOT REQUIRED]*.
 
@@ -634,8 +638,8 @@ Modification Settings — Selected Fields]*; **Assign Admins** → **Rule Admin 
    специфікацію.
 2. `Contacted` в **Action on Approval** етапу 1 — статус зміниться після User B, до рішення
    адміністратора. Має бути в **Action on Final Approval**.
-3. **At least one stage is approved** — лід погоджується вже після User B. Має бути **All stages are
-   approved** + **Sequential**.
+3. **At least one stage is approved (Anyone)** — лід погоджується вже після User B. Має бути **All stages are
+   approved (Everyone)** + **Sequential**.
 4. **Action on Rejection** порожній — має бути **Update fields** → **Lead Status** = `Not Contacted`.
 
 **14.5.** Готово, коли: у CRM три активні підтверджені користувачі; User B і User C мають CRM, роль і
@@ -666,7 +670,7 @@ Processes** відкривається. Корисно: окремий проф�
 | **Module** / **Send for Approval on** | `Leads` / `Create Record` |
 | `Rule 1` → **Approval Criteria** | **Lead Source** `is` `Cold Call` |
 | **Approval Stages** | етап 1: **User** → User B; етап 2: **User** → Administrator |
-| **Overall approval flow** | **All stages are approved** → **Sequential** |
+| **Overall approval flow** | **All stages are approved (Everyone)** → **Sequential** |
 | **Action on Final Approval** | **Update fields**: **Lead Status** = `Contacted` |
 | **Action on Rejection** | **Update fields**: **Lead Status** = `Not Contacted` |
 | **Record Modification Settings**, **Assign Admins** | типові |

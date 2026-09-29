@@ -19,7 +19,7 @@
 |---|---|---|
 | модуль | над чим працює правило | проєкти, задачі, записи часу, фази, користувачі |
 | layout | на які записи поширюється: усі layouts (**All Layouts**) або вибрані | layout задач одного проєкту |
-| execution condition | коли запускається: на дію користувача (**Based on User action**) чи за датою (**Based on Date & Time**) | задачу створено; за 3 дні до дедлайну |
+| **This rule will be executed** (розділ WHEN) | коли запускається: на дію користувача (**Based on User action**) чи за датою (**Based on Date & Time**) | задачу створено; за 3 дні до дедлайну |
 | умови | **Condition 1**, **Condition 2**… — у кожній набір критеріїв | `Task Name` містить `QA` |
 | дії | що зробити, коли умова збіглась | **Update Field** → власник = я |
 
@@ -159,7 +159,7 @@ Custom View**.
 
 | Налаштування | Що дає |
 |---|---|
-| **Share Custom View** | для всіх користувачів проєкту або для вибраних |
+| **Share Custom View with other Users** | **All Users** (усі користувачі проєкту) або **Specific Users** (вибрані) |
 | **Accessibility** | показувати в **Overview → Tasks** і в інших проєктах (усіх або вибраних); не вибрано нічого — представлення є лише в цьому проєкті |
 | меню представлення | **Edit**, **Copy Link**, **Delete**, **Clone**, **Set as Default** |
 | обмеження | до 20 критеріїв; у шаблонах проєктів custom views не задаються |
@@ -492,7 +492,7 @@ login`; б) `QA - Smoke`; в) `Release notes`? Що зміниться в а), �
 |---|---|
 | Rule Name | `Auto Assign QA Tasks` |
 | Layout | layout твого проєкту (правило створене з **Tasks → Automation**) |
-| Execution condition | **Based on User action**, подія створення задачі |
+| This rule will be executed | **Based on User action**, подія створення задачі |
 | Condition 1 | `Task Name` містить `QA` |
 | Action | **Update Field** → **Owner** = ти |
 | Execute the next workflow rule | не відмічено |

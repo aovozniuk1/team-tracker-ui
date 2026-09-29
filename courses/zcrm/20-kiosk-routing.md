@@ -59,6 +59,7 @@ Kiosk 2 використовує Predefined Configuration: кожне потрі
 | Email | Email Address (Basic_Registration) | так само | так само |
 | Phone | Phone Number (Basic_Registration) | так само | так само |
 | Lead Source | статичне `Web Download` | статичне `Cold Call` | статичне `Web Research` |
+| Company | статичне `Not provided` | так само | так само |
 | Description | Additional Notes (Technology_Screening) | Finance Additional Notes (Finance_Screening) | General Additional Notes (General_Intake) |
 | лист | User B | User C | не надсилається |
 
@@ -72,9 +73,8 @@ Kiosk 2 використовує Predefined Configuration: кожне потрі
 обов'язкові поля, які нікуди не зберігаються. Її фіксують як спостереження (observation) і
 уточнюють у замовника, а не як дефект продукту.
 
-І ще одне поле: **Company**. Кіоск його не збирає. Якщо конфігурація дії Create records вимагатиме
-заповнити обов'язкові поля модуля, дай Company статичне значення (наприклад, `Not provided`) і
-запиши це як відхилення від завдання.
+І ще одне поле: **Company**. Кіоск його не збирає, але лід без Company не створиться, тож дія
+Create records мусить його задати: дай Company статичне значення `Not provided`.
 
 ### Лист
 
@@ -175,14 +175,14 @@ Description як вище → **Next**. Модуль задавати не по�
 **Крок 2. Екран Basic_Registration.** **+** → **Screen** → **Add**, назва `Basic_Registration`.
 Елементи в такому порядку:
 
-| # | елемент | Label | налаштування |
+| # | елемент | Field Name | налаштування |
 |---|---|---|---|
 | 1 | Text (Display Element) | — | `Welcome to SwiftHire Candidate Registration. Please complete all mandatory fields to register a new candidate inquiry.` |
 | 2 | Field — Single Line | `First Name` | Mandatory |
 | 3 | Field — Single Line | `Last Name` | Mandatory |
 | 4 | Field — Email | `Email Address` | Mandatory |
 | 5 | Field — Phone | `Phone Number` | Mandatory |
-| 6 | Field — Pick List (Local) | `Job Category` | Mandatory; значення `Technology`, `Finance`, `Sales`, `Other` |
+| 6 | Field — Pick List (**Pick List Type**: Local) | `Job Category` | Mandatory; значення `Technology`, `Finance`, `Sales`, `Other` |
 
 Одна кнопка: `Continue`.
 
@@ -203,7 +203,7 @@ Description як вище → **Next**. Модуль задавати не по�
 **Крок 4. Екран Technology_Screening (екран 2T).** На гілці `Technology_Path` → **+** → **Screen**
 `Technology_Screening`:
 
-| елемент | Label | налаштування |
+| елемент | Field Name | налаштування |
 |---|---|---|
 | Text | — | `Technology Role — Additional Screening. Please provide the following details for this candidate.` |
 | Field — Number | `Years of Experience` | Mandatory; максимум цифр (Maximum digits allowed) — `2` |
@@ -228,6 +228,7 @@ Description як вище → **Next**. Модуль задавати не по�
 | Email | ← Email Address (Basic_Registration) |
 | Phone | ← Phone Number (Basic_Registration) |
 | Lead Source | статичне значення `Web Download` |
+| Company | статичне значення `Not provided` (без Company лід не створиться) |
 | Description | ← Additional Notes (Technology_Screening) |
 
 Далі на тій самій гілці ще раз **+** → дія 2 — **Email Notifications**:
@@ -239,11 +240,11 @@ Description як вище → **Next**. Модуль задавати не по�
    GetRecords / CreatedRecords, кожна недоступна, якщо джерела немає; обери **CreatedRecords:
    Create_Lead_Tech > CreatedRecord (Leads)** — з'являється лише коли в Create_Lead_Tech увімкнено
    Wait for completion |
-| Recipient (To) | User B |
+| **To** | User B |
 | Email Template | шаблон із темою `New Technology Candidate Registered` і текстом `A new Technology candidate has been registered in Zoho CRM. Please review the lead record at your earliest convenience.` |
 
 Email Notification не має вбудованих полів Subject/Body — тема й
-текст задаєш лише через окремий **Email Template** (Setup → Templates → Email, або кнопка **Create
+текст задаєш лише через окремий **Email Template** (Setup → Customization → Templates, вкладка Email, або кнопка **Create
 Template** з вибору шаблону — вона відкривається в новому вікні браузера). Створи шаблон із цими
 темою і текстом заздалегідь, потім обери його. У полі одержувача (**To**) варіанти обмежені: «People
 Associated with the Module» → Lead (поля запису, як-от Email, Owner) або «Users» → **Logged in
@@ -255,7 +256,7 @@ CRM-користувача, що відповідає за напрям.
 **Крок 6. Екран Finance_Screening (екран 2F).** На гілці `Finance_Path` → **+** → **Screen**
 `Finance_Screening`:
 
-| елемент | Label | налаштування |
+| елемент | Field Name | налаштування |
 |---|---|---|
 | Text | — | `Finance Role — Additional Screening. Please provide the following details for this candidate.` |
 | Field — Single Line | `Certification or Qualification` | Mandatory |
@@ -274,9 +275,10 @@ name already exists». Те саме для екрана 2G нижче.
 - дія 1 — Create records → Predefined Configuration, Action Name `Create_Lead_Finance`, Wait for
    completion увімкнено одразу, Module Leads, **Lead Owner** обов'язкове (обери значення), те саме
    зіставлення First Name / Last Name / Email / Phone з Basic_Registration, **Lead Source** —
-   статичне `Cold Call`, **Description** ← **Finance Additional Notes** (**Finance_Screening**);
+   статичне `Cold Call`, **Company** — статичне `Not provided`,
+   **Description** ← **Finance Additional Notes** (**Finance_Screening**);
 - дія 2 — Email Notifications, Action Name `Notify_UserC_Finance`, **Execute for record** →
-   CreatedRecords: Create_Lead_Finance > CreatedRecord (Leads), Recipient (To) **User C**, Email
+   CreatedRecords: Create_Lead_Finance > CreatedRecord (Leads), **To** **User C**, Email
    Template з темою `New Finance Candidate Registered` і текстом `A new Finance candidate has been
    registered in Zoho CRM. Please review the lead record at your earliest convenience.`
 
@@ -286,7 +288,7 @@ name already exists». Те саме для екрана 2G нижче.
 **Крок 8. Екран General_Intake (екран 2G).** На гілці `General_Path` → **+** → **Screen**
 `General_Intake`:
 
-| елемент | Label | налаштування |
+| елемент | Field Name | налаштування |
 |---|---|---|
 | Text | — | `General Application — Please provide the following details for this candidate.` |
 | Field — Single Line | `Current Role or Position` | не обов'язкове |
@@ -297,14 +299,15 @@ name already exists». Те саме для екрана 2G нижче.
 **Крок 9. Дія General-гілки.** Після **Submit Registration** екрана 2G — лише одна дія: Create
 records → Predefined Configuration, Action Name `Create_Lead_General`, **Lead Owner** обов'язкове
 (обери значення), Module Leads, те саме зіставлення з Basic_Registration, **Lead Source** — статичне
-`Web Research`, **Description** ← **General Additional Notes** (**General_Intake**). Листа на цій
+`Web Research`, **Company** — статичне `Not provided`, **Description** ← **General Additional Notes**
+(**General_Intake**). Листа на цій
 гілці немає.
 
 **Крок 10. Екрани підтвердження.** У кінці кожної з трьох гілок, після дій, додай **Screen**. Назви —
 унікальні: `Confirmation_Tech`, `Confirmation_Finance`, `Confirmation_General`. Кожен містить:
 
 - Text: `Registration complete. The candidate record has been created in Zoho CRM. Thank you.`
-- Field — Single Line з Label `Registered Name` (на Confirmation_Tech), **`Registered Name Finance`**
+- Field — Single Line з **Field Name** `Registered Name` (на Confirmation_Tech), **`Registered Name Finance`**
    (на Confirmation_Finance), **`Registered Name General`** (на Confirmation_General) — та сама
    причина унікальності назв, що й для нотаток: увімкни Merge from module, `#` → екран
    Basic_Registration → **First Name**; Read Only;
@@ -357,8 +360,8 @@ Studio; налаштування Home page). Створені під час пр
 відомими Lead Status і Description. Кроки: відкрий лід → **Log Call Outcome** → перевір, що
 відкрився екран `Call_Outcome_Entry` і поле Lead Name містить ім'я цього ліда → обери статус у
 **Update Lead Status**, введи текст у **Call Notes** → **Save & Close** → перевір екран
-`Confirmation` з текстом про успіх → **Close** → відкрий лід знову. Очікувано: Lead Status і
-Description дорівнюють введеним у кіоску.
+`Confirmation` з текстом про успіх → **Close** → відкрий лід знову. Очікувано: Lead Status — обраний у
+кіоску, а в Notes ліда — нова нотатка з текстом Call Notes (дія **Add Note**; Description не змінюється).
 
 **Test Scenario 2 — простий кіоск: Cancel не змінює запис.**
 Передумови ті самі. Кроки: запиши поточні Lead Status і Description → **Log Call Outcome** → заповни
@@ -440,8 +443,8 @@ Blocked / Not verifiable), посилання на докази, примітк�
 
 Усе створюється в Zoho Office Suite і передається ментору публічним посиланням у чаті. Назва
 документа має відповідати назві завдання, тож починай назви з `Kiosk Studio in Zoho CRM (A20)`.
-Файли зберігай у WorkDrive (у новому тріалі її спершу додають в **Admin Panel → Applications → Add
-Application → WorkDrive**).
+Файли зберігай у WorkDrive (у новому тріалі її спершу додають в **Admin Panel → Applications → +
+(Add Application) → Add Zoho Apps → WorkDrive → Add**).
 
 | # | Deliverable | Format | Tool |
 |---|---|---|---|
@@ -474,7 +477,7 @@ Description фінансового ліда порожній.
 `Web Research`.
 
 **5. Лист на неправильній гілці або не тому адресату.** User B отримує листи про фінансистів — дія
-скопійована з Technology-гілки без зміни Recipient.
+скопійована з Technology-гілки без зміни **To**.
 
 **6. Однакові назви підтверджень.** Три екрани `Confirmation` не пройдуть: назви мають бути
 унікальні.
@@ -498,7 +501,7 @@ verifiable, а не Pass.
 | усі нові ліди мають Lead Source `Web Research` | рішення не спрацьовує — див. рядок вище |
 | Description порожній, хоча нотатки вводили | Description зіставлено з Additional Notes іншого екрана |
 | Registered Name порожній | merge взято не з Basic_Registration або не з First Name |
-| на Finance-гілці лист отримав User B | дія листа скопійована без зміни Recipient |
+| на Finance-гілці лист отримав User B | дія листа скопійована без зміни **To** |
 | листа немає зовсім | неправильна адреса користувача; лист у спамі; дія листа не на тій гілці |
 | кіоска немає в наборі компонентів Home page | кіоск не опубліковано або він неактивний |
 | User B не бачить компонент | компонент на твоїй User's Home Page; Customized Home Page не відкрита його ролі чи профілю або неактивна |
@@ -552,9 +555,9 @@ Experience`, обов'язкове, максимум 2 цифри; Single Line `
 Multi-line `Additional Notes`, необов'язкове; кнопка `Submit Registration`), дію Create records →
 Predefined Configuration `Create_Lead_Tech` (Leads; Wait for completion увімкнено одразу; Lead Owner
 обов'язкове; First Name, Last Name, Email, Phone з Basic_Registration; Lead Source `Web Download`;
-Description ← Additional Notes з Technology_Screening) і дію Email Notifications
+Company `Not provided`; Description ← Additional Notes з Technology_Screening) і дію Email Notifications
 `Notify_UserB_Tech` (Execute for record → CreatedRecords: Create_Lead_Tech > CreatedRecord (Leads);
-Recipient User B; Email Template з темою `New Technology Candidate Registered` і текстом `A new
+**To** User B; Email Template з темою `New Technology Candidate Registered` і текстом `A new
 Technology candidate has been registered in Zoho CRM. Please review the lead record at your earliest
 convenience.`).
 
@@ -564,8 +567,8 @@ Additional Screening. Please provide the following details for this candidate.`;
 підказкою `Example: Corporate Finance, Risk, Audit, Tax.`; Multi-line `Finance Additional Notes`
 (назва відрізняється від Technology-екрана — назви полів унікальні в межах кіоска), необов'язкове;
 кнопка `Submit Registration`), дію `Create_Lead_Finance` (Leads; Lead Owner обов'язкове; ті самі
-чотири поля з Basic_Registration; Lead Source `Cold Call`; Description ← Finance Additional Notes з
-Finance_Screening) і лист `Notify_UserC_Finance` (Execute for record → CreatedRecords; Recipient
+чотири поля з Basic_Registration; Lead Source `Cold Call`; Company `Not provided`; Description ← Finance Additional Notes з
+Finance_Screening) і лист `Notify_UserC_Finance` (Execute for record → CreatedRecords; **To**
 User C; Email Template з темою `New Finance Candidate Registered` і текстом `A new Finance
 candidate has been registered in Zoho CRM. Please review the lead record at your earliest
 convenience.`).
@@ -574,8 +577,8 @@ convenience.`).
 Application — Please provide the following details for this candidate.`; Single Line `Current Role or
 Position`, необов'язкове; Multi-line `General Additional Notes` (знову унікальна назва),
 необов'язкове; кнопка `Submit Registration`) і дію `Create_Lead_General` (Leads; Lead Owner
-обов'язкове; ті самі чотири поля з Basic_Registration; Lead Source `Web Research`; Description ←
-General Additional Notes з General_Intake). Листа на цій гілці немає. Поясни, чому Lead Source тут не
+обов'язкове; ті самі чотири поля з Basic_Registration; Lead Source `Web Research`; Company `Not provided`;
+Description ← General Additional Notes з General_Intake). Листа на цій гілці немає. Поясни, чому Lead Source тут не
 `Other`.
 
 **20.7.** Заверши `CAND_IntakeRouter`: у кінці кожної гілки екран підтвердження (`Confirmation_Tech`,
@@ -588,7 +591,8 @@ merge `#` → Basic_Registration → First Name, Read Only) і кнопкою `C
 
 **20.8.** Виконай Test Scenario 1 і Test Scenario 2 для простого кіоска: кіоск `LC_QuickUpdate`
 відкривається кнопкою `Log Call Outcome` на картці ліда, показує ім'я ліда в Lead Name, пише обраний
-статус у Lead Status і нотатки в Description після Save & Close і нічого не змінює після Cancel.
+статус у Lead Status, а Call Notes — окремою нотаткою (**Add Note**) після Save & Close і нічого не
+змінює після Cancel.
 TS1: наскрізне оновлення з перевіркою картки після. TS2: Cancel, з фіксацією значень до і після.
 Оформи обидва в Test Scenarios document і Test Cases table з доказами.
 
@@ -600,7 +604,7 @@ TS1: наскрізне оновлення з перевіркою картки 
 **20.10.** *(знайди помилки)* Ось конфігурація колеги. Знайди всі помилки і скажи, як кожна
 проявиться під час тестів:
    - у `Create_Lead_Finance`: Description ← Additional Notes (Technology_Screening);
-   - `Notify_UserC_Finance`: Recipient = User B;
+   - `Notify_UserC_Finance`: **To** = User B;
    - `Create_Lead_General`: Lead Source — статичне `Other`;
    - `Years of Experience`: Maximum digits allowed = 3;
    - на Finance-гілці екран підтвердження названо `Confirmation_Tech`;
@@ -650,17 +654,17 @@ Route_by_Category з трьома гілками. Модуль задавати 
 | елемент | налаштування |
 |---|---|
 | `Technology_Screening` | Text; `Years of Experience` (Number, Mandatory, Maximum digits allowed = 2); `Primary Technical Skill` (Single Line, Mandatory); `Additional Notes` (Multi-line); кнопка `Submit Registration` |
-| `Create_Lead_Tech` | Create records → Predefined Configuration; Leads; First Name, Last Name, Email ← Email Address, Phone ← Phone Number з Basic_Registration; Lead Source = `Web Download`; Description ← Additional Notes (Technology_Screening) |
-| `Notify_UserB_Tech` | Email Notifications; User B; тема і текст із завдання |
+| `Create_Lead_Tech` | Create records → Predefined Configuration; Leads; First Name, Last Name, Email ← Email Address, Phone ← Phone Number з Basic_Registration; Lead Source = `Web Download`; Company = `Not provided`; Description ← Additional Notes (Technology_Screening) |
+| `Notify_UserB_Tech` | Email Notifications; **To** User B; **Email Template** з темою і текстом із завдання |
 
 **20.5.** Finance-гілка: `Finance_Screening` з двома обов'язковими Single Line (у `Finance
 Specialisation` — Show tool tip з прикладом) і необов'язковим Multi-line; `Create_Lead_Finance` —
-Lead Source `Cold Call`, Description ← Additional Notes саме з Finance_Screening;
-`Notify_UserC_Finance` — Recipient User C. Контрольне питання до себе: чи не лишилося в Finance-дії
-чогось від Technology (Recipient, поле Additional Notes, Lead Source)?
+Lead Source `Cold Call`, Company `Not provided`, Description ← Additional Notes саме з Finance_Screening;
+`Notify_UserC_Finance` — **To** User C. Контрольне питання до себе: чи не лишилося в Finance-дії
+чогось від Technology (**To**, поле Additional Notes, Lead Source)?
 
 **20.6.** General-гілка: `General_Intake` з двома необов'язковими полями і кнопкою Submit
-Registration; `Create_Lead_General` з Lead Source `Web Research` і Description ← Additional Notes з
+Registration; `Create_Lead_General` з Lead Source `Web Research`, Company `Not provided` і Description ← Additional Notes з
 General_Intake; дії листа немає. Не `Other`, бо Lead Source у тріалі не має такого значення:
 статичне значення picklist має існувати в полі CRM. `Web Research` — наявне значення, яке до того ж
 відрізняє цю гілку від двох інших.
@@ -673,8 +677,9 @@ Registration` на Home page. Щоб компонент бачили User B і U
 показує компонент із першим екраном кіоска.
 
 **20.8.** TS1: Pass, якщо Lead Name = ім'я ліда, після Save & Close видно Confirmation, а картка ліда
-показує обраний статус і введені нотатки в Description. TS2: Pass, якщо після Cancel видно Cancelled
-з текстом `No changes were made. The record has not been updated.`, а Lead Status і Description
+показує обраний статус і нову нотатку з введеним текстом (Description не змінюється). TS2: Pass,
+якщо після Cancel видно Cancelled з текстом `No changes were made. The record has not been
+updated.`, а Lead Status і Description
 збігаються з записаними до тесту. Докази: екрани кіоска, картка до і після; для TS1 цей скриншот
 закриває вимогу пакета «оновлення поля підтверджене в ліді».
 
@@ -695,7 +700,7 @@ Primary Technical Skill у лід не потрапили (див. 20.12).
 | помилка | як проявиться |
 |---|---|
 | Finance-дія бере Additional Notes з Technology_Screening | у фінансових лідів Description порожній: на Finance-гілці цей екран не показувався |
-| Recipient Finance-листа = User B | у TS4 лист отримує User B, а User C — ні |
+| **To** Finance-листа = User B | у TS4 лист отримує User B, а User C — ні |
 | Lead Source `Other` | значення в тріалі немає: налаштувати його не вийде або лід не отримає очікуваного Lead Source — TS5 впаде |
 | Maximum digits = 3 | `100` приймається; граничний тест на 3 цифри падає |
 | на Finance-гілці екран `Confirmation_Tech` | назва вже зайнята Technology-гілкою, а назви мають бути унікальні — так налаштувати не вийде; якщо ж назви просто переплутали, докази й документація не збігаються з конфігурацією |
@@ -738,7 +743,7 @@ Description). Це не дефект продукту — система роб�
    - **Actual:** Lead Source `Web Download`; email received by User B; User C got nothing.
    - **Severity:** High — маршрутизація, заради якої існує кіоск, не працює для цілої категорії.
    - **Evidence:** скриншоти екранів кіоска, картки ліда, обох скриньок; конфігурація дій Finance-гілки.
-   - **Hypothesis:** дії Finance-гілки скопійовані з Technology-гілки без змін (Lead Source, Recipient).
+   - **Hypothesis:** дії Finance-гілки скопійовані з Technology-гілки без змін (Lead Source, **To**).
       Якщо після Continue показувався Technology_Screening — перевір умови рішення.
 
 **20.14.** Пакет: `Kiosk Studio in Zoho CRM (A20) — Test Scenarios` (Writer, п'ять сценаріїв),

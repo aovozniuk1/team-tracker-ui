@@ -260,7 +260,7 @@ rules created yet.» і показує кнопку **New Layout Rule**, яка 
 |---|---|---|
 | `Risk Type` | Pick List | `Operational`, `Financial`, `Compliance`, `Strategic` |
 | `Risk Severity` | Pick List | `Low`, `Medium`, `High`, `Critical` |
-| `Mitigation Plan` | Multi-Line Text | — |
+| `Mitigation Plan` | Multi-Line | — |
 | `Assigned Reviewer` | User Pick List | — |
 | `Review Due Date` | Date | — |
 | `Residual Risk Level` | Pick List | `Acceptable`, `Monitor`, `Escalate` |
@@ -437,7 +437,7 @@ rules created yet.» і показує кнопку **New Layout Rule**, яка 
 | `Customer Contact Method` | Pick List | `Email`, `Phone`, `Chat` |
 | `Escalation Stage` | Pick List | `Level 1`, `Level 2`, `Final` |
 | `Escalated To` | User Pick List | — |
-| `Public Response Draft` | Multi-Line Text | — |
+| `Public Response Draft` | Multi-Line | — |
 | `Deadline for Resolution` | Date | — |
 
 **Правила:**
@@ -672,7 +672,7 @@ Severity = Low, вимкнути Mitigation Plan і Residual Risk Level. Show fi
 
 **14.3.** *(завдання 1, частина 1)* Створи layout `Risk Assessment Layout` і кастомні поля:
 `Risk Type` (Pick List: `Operational`, `Financial`, `Compliance`, `Strategic`), `Risk Severity`
-(Pick List: `Low`, `Medium`, `High`, `Critical`), `Mitigation Plan` (Multi-Line Text),
+(Pick List: `Low`, `Medium`, `High`, `Critical`), `Mitigation Plan` (Multi-Line),
 `Assigned Reviewer` (User Pick List), `Review Due Date` (Date), `Residual Risk Level` (Pick List:
 `Acceptable`, `Monitor`, `Escalate`). Створи тестовий проєкт `Layout QA – Risk`, прив'язаний саме
 до цього layout.
@@ -710,7 +710,7 @@ System Access Level = Guest: вимкнути Training Module. Перевір у
 `Incident Type` (Pick List: `Technical`, `Billing`, `Complaint`, `Feedback`),
 `Requires External Communication?` (Checkbox), `Customer Contact Method` (Pick List: `Email`,
 `Phone`, `Chat`), `Escalation Stage` (Pick List: `Level 1`, `Level 2`, `Final`), `Escalated To`
-(User Pick List), `Public Response Draft` (Multi-Line Text), `Deadline for Resolution` (Date).
+(User Pick List), `Public Response Draft` (Multi-Line), `Deadline for Resolution` (Date).
 Створи проєкт `Layout QA – Incident` на цьому layout.
 
 **14.8.** *(завдання 3, частина 2)* Створи правила: Rule 1 (Conditional) — якщо Requires External
@@ -880,7 +880,7 @@ Mandatory і дефолтів, **Save Layout**. Проєкт `Layout QA – Inci
 
 **14.9.**
 1. Проєкт отримав приватну копію — інший layout; правила на оригіналі на нього не діють. Прив'яжи
-   `Risk Demo` до `Risk Assessment Layout` (**+** → **Associate Projects**) або створи правила на
+   `Risk Demo` до `Risk Assessment Layout` (**•••** → **Associate Project**) або створи правила на
    копії.
 2. Одне поле не може одночасно мати два значення — умова не виконується ніколи. Потрібно OR (або
    один критерій з двома значеннями).
@@ -935,8 +935,8 @@ layout. Можливі результати:
   кожна копія живе окремо, і зміни в правилах оригіналу до неї не дійдуть.
 
 Обидва — факт для звіту і причина знімати галочку приватної копії для тестових проєктів.
-Прибирання: переведи `Layout QA – Risk Copy` на `Risk Assessment Layout` (**+** → **Associate
-Projects**); якщо в копії є свої правила, спершу видали їх (layout із правилами не видаляється);
+Прибирання: переведи `Layout QA – Risk Copy` на `Risk Assessment Layout` (**•••** → **Associate
+Project**); якщо в копії є свої правила, спершу видали їх (layout із правилами не видаляється);
 потім видали копію, що лишилась без проєкту. Сам проєкт можна перемістити в кошик, але він і там
 лишиться прив'язаним до `Risk Assessment Layout`: перш ніж колись видаляти цей layout, переведи
 проєкт на інший.

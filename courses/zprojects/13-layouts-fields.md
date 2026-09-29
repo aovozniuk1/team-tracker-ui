@@ -306,7 +306,7 @@ Fields** видно всі поля модуля: де вони стоять і 
 ### Видалити layout
 
 1. **Setup → Customization → Layouts → Task**.
-2. Наведи курсор на layout → іконка видалення → **Delete** → підтверди. Діалог попереджає: разом із
+2. Наведи курсор на layout → **•••** (More) → **Delete** → підтверди. Діалог попереджає: разом із
    layout видаляється вся прив'язана до нього автоматизація задач (Blueprint, Workflow Rules, Email
    Alerts, Codex Scripts).
 
@@ -339,7 +339,7 @@ Standard Layout не видаляється. Кастомний видаляєт
 **З боку layout:**
 
 1. **Setup → Customization → Layouts → Task**.
-2. Наведи курсор на layout і натисни іконку плюс біля назви → **Associate Projects**.
+2. Наведи курсор на layout і натисни **•••** (More) біля назви → **Associate Project**.
 3. Обери проєкти (до 5 за раз) або шаблони проєктів.
 4. Підтверди → **Associate**.
 
@@ -778,7 +778,7 @@ Expected Result, Actual Result, Pass/Fail, Notes/Attachments.
    `Layout Sandbox Project`.
 
 Якщо під `QA Fields Sandbox` порожньо, а в кінці списку з'явився layout з назвою проєкту, галочка
-лишилась: проєкт отримав копію. Виправ: **+** біля `QA Fields Sandbox` → **Associate Projects** →
+лишилась: проєкт отримав копію. Виправ: **•••** біля `QA Fields Sandbox` → **Associate Project** →
 `Layout Sandbox Project` → **Associate**.
 
 **13.4.**
@@ -923,10 +923,10 @@ Actual Result і Pass/Fail заповнюєш під час прогону; у N
 | спеціальні поля | Lookup, Connect Module, Summary, Formula | Connect Module |
 
 **13.14.**
-1. **Setup → Customization → Layouts → Task** → **+** біля `Standard Layout` → **Associate
-   Projects** → обидва sandbox-проєкти → **Associate**; якщо Zoho просить зіставити статус
+1. **Setup → Customization → Layouts → Task** → **•••** біля `Standard Layout` → **Associate
+   Project** → обидва sandbox-проєкти → **Associate**; якщо Zoho просить зіставити статус
    `Blocked` — обери `Open` (**Map Status & Associate Project**).
-2. Під `QA Fields Sandbox` порожньо → наведи курсор → іконка видалення → **Delete** → підтверди.
+2. Під `QA Fields Sandbox` порожньо → наведи курсор → **•••** (More) → **Delete** → підтверди.
 3. **Setup → Customization → Fields** → по черзі п'ять полів → кошик → підтверди.
 
 Не відкотити: значення п'яти полів у задачах (видалені разом із полями) і сам layout (новий

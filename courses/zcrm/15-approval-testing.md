@@ -25,7 +25,8 @@
 
 1. **Admin Panel → User Management → Users → Add User**. Форма просить **First name**, **Last
    name**, **Email**; прапорець **Send Notification Mail** надсилає людині запрошення. Кнопка
-   **+ New User** у CRM (**Setup → General → Users**) лише відкриває цю сторінку адмін-панелі.
+   **+ New User** у CRM (**Setup → General → Users**) відкриває не цю форму, а сторінку адмін-панелі
+   **Applications → CRM** з панеллю **Assign CRM to User(s)**.
 2. Переконайся, що обом призначено CRM.
 3. У CRM, **Setup → General → Users**, задай кожному Role і Profile.
 
@@ -55,9 +56,9 @@ Approval Processes**, переконайся, що всі три процеси 
 | **Module** | Deals | Leads | Contacts |
 | **Send for Approval on** | Create or Edit Record | Create Record | Edit Record |
 | **Approval Criteria** (Rule 1) | Amount `>` `10000` | Lead Source is `Cold Call` | Mailing Address - Country / Region isn't `United States` |
-| **Approval Stages** | один етап: User B | етап 1: User B; етап 2: адміністратор; **Overall approval flow**: All stages are approved → Sequential | один етап: User B |
+| **Approval Stages** | один етап: User B | етап 1: User B; етап 2: адміністратор; **Overall approval flow**: All stages are approved (Everyone) → Sequential | один етап: User B |
 | **Action on Final Approval** | Update fields: Stage = `Needs Analysis` | Update fields: Lead Status = `Contacted` | — |
-| **Action on Rejection** | Email Notifications → Record Owner | Update fields: Lead Status = `Not Contacted` | — |
+| **Action on Rejection** | Email Notifications → Owner (**To → Deal → Owner**) | Update fields: Lead Status = `Not Contacted` | — |
 | **Record Modification Settings** | Allow approvers to edit pending approval records — не позначено | за замовчуванням | позначено, Selected Fields → лише Mailing Address - Country / Region |
 | **Assign Admins** | не задано | не задано | адміністратор; Allow rule admins to edit pending approval records → All Fields |
 
@@ -70,7 +71,8 @@ Fields).
 Final Action змінює поле — отже, до погодження поле мусить мати інше значення, інакше тест нічого
 не покаже:
 
-- угоди створюй зі **Stage** `Qualification`, а не `Needs Analysis`;
+- угоди створюй зі **Stage** `Qualification`, а не `Needs Analysis`, у pipeline **Standard** (після A12
+  `Needs Analysis` є лише в ньому — в іншому pipeline фінальна дія Stage не змінить);
 - ліди створюй з **Lead Status** `Attempted to Contact`, а не `Contacted` чи `Not Contacted`.
 
 Давай записам імена, з яких видно потік: `A1-Approve-15000`, `B2-RejectStage1`, `C3-Resubmit`.
@@ -189,7 +191,8 @@ records that are awaiting approval by other users`. Як саме це розк�
 ### A-1. Погодити угоду понад 10 000
 
 1. **User C** → **Deals** → нова угода з назвою `A1-Approve-15000`: **Amount** `15000`, **Stage**
-   `Qualification`, решта обов'язкових полів — як вимагає форма. Збережи.
+   `Qualification`, **Pipeline** — Standard (після A12 лише в ньому є `Needs Analysis`), решта
+   обов'язкових полів — як вимагає форма. Збережи.
    **Що побачиш:** угоду збережено й заблоковано: замок, `Waiting for your response: 0/1`, недоступні
    **Edit** і **Delete**. Скриншот `A-1-RecordLocked.png`.
 2. **User B** → **Workqueue → My Jobs → Approvals**.
@@ -211,8 +214,8 @@ records that are awaiting approval by other users`. Як саме це розк�
    поля причини — воно є лише в review process, не в approval process) → впиши, наприклад,
    `Discount terms are not justified.` → **Reject**. Скриншот `A-2-Rejected.png`.
 3. **User C** → скринька (або дзвіночок сповіщень у CRM).
-   **Що побачиш:** лист, налаштований в **Action on Rejection → Email Notifications** для Record
-   Owner. Окремо від нього може прийти системний лист з коментарем погоджувача — розрізняй їх за
+   **Що побачиш:** лист, налаштований в **Action on Rejection → Email Notifications** для власника
+   угоди (**Owner**). Окремо від нього може прийти системний лист з коментарем погоджувача — розрізняй їх за
    темою. Скриншот `A-2-RejectionEmail.png`. Якщо доступу до самої скриньки нема, у записі на
    вкладці **Timeline** з'являється запис за фактом відправки — **"Email Sent to ⟨власник⟩ using
    Email Notification ⟨назва сповіщення⟩ via Approval Process ⟨назва процесу⟩"** — цього досить,
@@ -313,7 +316,7 @@ records that are awaiting approval by other users`. Як саме це розк�
    «by the Process Admin», а не просто ім'я — доказ, що рішення пройшло через Takeover, а не
    звичайне погодження); у черзі User B запису більше нема. Довідка описує ще
    окремий журнал **Approval History** в My Jobs (фільтри Modules, Users, Actions, Time,
-   вмикається поетапно) — Timeline для доказу вже достатньо. Скриншот `C-2-ApprovalHistory.png`.
+   вмикається поетапно), але в тріалі такого екрана нема — доказ дає Timeline. Скриншот `C-2-ApprovalHistory.png`.
 
 Контрольна перевірка: під User C на сторінці контакту **Takeover** нема. А в сценаріях A і B, де
 rule admins не задано, перехопити рішення може будь-який адміністратор — це теж варто показати.
@@ -430,8 +433,8 @@ Status (PASS / FAIL / BLOCKED)**. Приклад рядка:
 
 **Здача.**
 
-1. WorkDrive має бути доданий в організацію: Zoho One **Admin Panel → Applications → Add
-   Application → WorkDrive**.
+1. WorkDrive має бути доданий в організацію: Zoho One **Admin Panel → Applications → +
+   (Add Application) → Add Zoho Apps → WorkDrive → Add**.
 2. У WorkDrive створи папку `[YourName]_ZohoCRM_A17`.
 3. Поклади в неї документ тест-кейсів, звіт про дефекти (якщо є), папку `Evidence_Screenshots` і
    відео.
@@ -482,7 +485,7 @@ A-1 навіть без фінальної дії.
 | у **Workqueue → My Jobs → Approvals** User B порожньо, хоча запис заблоковано | запис чекає іншого погоджувача або іншого етапу; на сторінці запису видно, кого саме |
 | адміністратор бачить лід B до рішення User B | він дивиться чужі погодження — для адміністратора це нормально; перевір свою чергу |
 | **Lead Status** змінився одразу після рішення User B | дію поставили на етап, а не у **Final Actions** |
-| **Stage** угоди не змінився після погодження | дія на погодження не налаштована або поле змінила інша автоматизація — дивись Timeline |
+| **Stage** угоди не змінився після погодження | дія на погодження не налаштована; угода в pipeline без стадії `Needs Analysis` (після A12 — бери **Standard**); або поле змінила інша автоматизація — дивись Timeline |
 | лід з `Cold Call` не пішов на погодження | його змінили на `Cold Call` після створення, а процес на Create Record |
 | контакт з `Germany` не пішов на погодження | його створили з `Germany`, а процес на Edit Record |
 | User B може правити всі поля контакту | у **Record Modification Settings** обрано All Fields замість Selected Fields |
@@ -490,7 +493,7 @@ A-1 навіть без фінальної дії.
 | **Takeover** нема в адміністратора | у правилі задано rule admins, і він не серед них |
 | **Resubmit** нема на відхиленому записі | ти не власник запису або минуло понад 180 днів |
 | після **Resubmit** запис одразу розблоковано | він уже не відповідає жодному критерію (наприклад, країну повернули на `United States`) |
-| лист про відхилення не прийшов | скринька User C недоступна чи в спамі, або лист у **Action on Rejection** адресований не Record Owner |
+| лист про відхилення не прийшов | скринька User C недоступна чи в спамі, або лист у **Action on Rejection** адресований не власнику угоди (**To → Deal → Owner**) |
 | посилання на папку просить увійти | доступ за посиланням не ввімкнено |
 
 ---
@@ -530,7 +533,7 @@ Review`, Edit Record, Mailing Address - Country / Region isn't `United States`, 
 лише Mailing Address - Country / Region, rule admin — адміністратор з правом правити всі поля); доданий WorkDrive.
 Склади чекліст готовності й пройди його.
 
-**15.2.** Потік A-1. Під User C створи угоду з **Amount** `15000` і переконайся, що запис
+**15.2.** Потік A-1. Під User C створи угоду з **Amount** `15000` (pipeline **Standard**) і переконайся, що запис
 заблоковано й позначено як такий, що чекає погодження. Під User B відкрий **Workqueue → My Jobs →
 Approvals**, знайди угоду, погодь з коментарем `Approved for review stage.` і перевір, що **Stage**
 став `Needs Analysis`. Потрібен процес A і користувачі B і C.
@@ -560,7 +563,7 @@ Approvals**, знайди угоду, погодь з коментарем `Appr
 
 **15.8.** Потік C-2. Повтори C-1, щоб отримати новий контакт, що чекає погодження. Під
 адміністратором (rule admin) на сторінці контакту знайди й застосуй **Takeover**, погодь запис і
-перевір, що дія відображена в історії погодження. Потрібен процес C з адміністратором як rule
+перевір, що дія відображена в **Timeline** запису. Потрібен процес C з адміністратором як rule
 admin.
 
 **15.9.** Потік C-3. Створи ситуацію, коли User B відхиляє погодження зміни Mailing Address - Country / Region. Під
@@ -620,7 +623,8 @@ FAIL / BLOCKED)**, щонайменше 9 тест-кейсів на всі по
   таблицею конфігурації (модуль, **Send for Approval on**, критерій, етапи, **Overall approval
   flow** для B, **Final Actions**, **Record Modification Settings**, **Assign Admins**);
 - [ ] скриншот списку процесів зі статусами зроблено;
-- [ ] WorkDrive доданий через **Admin Panel → Applications → Add Application → WorkDrive**;
+- [ ] WorkDrive доданий через **Admin Panel → Applications → + (Add Application) → Add Zoho Apps →
+  WorkDrive → Add**;
 - [ ] вирішено імена тестових записів і початкові значення (Stage `Qualification`, Lead Status
   `Attempted to Contact`).
 
@@ -629,11 +633,12 @@ FAIL / BLOCKED)**, щонайменше 9 тест-кейсів на всі по
 → My Jobs → Approvals** і лист про подачу (`A-1-PendingForUserB.png`); після **Approve** з
 коментарем `Approved for review stage.` — позначка Approved і запис зник з черги; на сторінці угоди
 **Stage** = `Needs Analysis`, замка нема (`A-1-StageNeedsAnalysis.png`). Якщо Stage не змінився,
-зазирни в Timeline: чи була дія процесу і чи не перезаписала поле інша автоматизація.
+зазирни в Timeline: чи була дія процесу, чи є `Needs Analysis` у pipeline угоди (після A12 — лише в
+**Standard**) і чи не перезаписала поле інша автоматизація.
 
 **15.3.** Очікування: `A2-Reject-20000` заблоковано; після **Reject** — позначка Rejected, запис
 зник з черги User B (`A-2-Rejected.png`); User C отримав лист, налаштований у **Action on
-Rejection** для Record Owner (`A-2-RejectionEmail.png`; системний лист з коментарем — окремо, не
+Rejection** для власника угоди, **Owner** (`A-2-RejectionEmail.png`; системний лист з коментарем — окремо, не
 плутай); угоду розблоковано, **Edit** доступний, є **Resubmit**, **Stage** лишився `Qualification`
 (`A-2-RecordUnlocked.png`). **Resubmit** у цьому потоці не натискай — достатньо показати, що він
 є.
@@ -662,9 +667,9 @@ Rejection** для Record Owner (`A-2-RejectionEmail.png`; системний л
 відрізнити від All Fields.
 
 **15.8.** Очікування: `C2-Takeover` чекає User B; на його сторінці адміністратор бачить
-**Takeover** (`C-2-AdminTakeover.png`), після перехоплення погоджує; в історії погодження (статус у
-записі, Timeline, **Approval History** з фільтром Modules = Contacts) дію виконав адміністратор
-(`C-2-ApprovalHistory.png`); у черзі User B запису більше нема. Контроль: під User C **Takeover**
+**Takeover** (`C-2-AdminTakeover.png`), після перехоплення погоджує; у **Timeline** запису (подія
+«… by the Process Admin ⟨ім'я⟩ …»; окремого екрана історії погоджень у тріалі нема) дію виконав
+адміністратор (`C-2-ApprovalHistory.png`); у черзі User B запису більше нема. Контроль: під User C **Takeover**
 нема.
 
 **15.9.** Очікування: після **Reject** запис `C3-Resubmit` розблоковано (`C-3-Rejected.png`); User C
@@ -698,7 +703,7 @@ Jobs → Approvals** у User B (`C-3-BackInQueue.png`). Пояснення: пр
   — у будь-якому разі не PASS без з'ясування.
 - TC-4: лише позитив; немає доказу, що інші поля заблоковані.
 - TC-5: довідка описує **Takeover** на сторінці запису, а тут — «натиснув у черзі» без скриншота;
-  не сказано, чи адміністратор — rule admin, чий це був запис і що показує історія погодження.
+  не сказано, чи адміністратор — rule admin, чий це був запис і що показує Timeline запису.
 - Загалом: нема **Expected Result**, нема негативних потоків, нема листа про відхилення,
   повторної подачі, часу кроків і посилань на скриншоти.
 
@@ -706,7 +711,7 @@ Jobs → Approvals** у User B (`C-3-BackInQueue.png`). Пояснення: пр
 
 | TC ID | Test Flow | Steps Summary | Expected Result |
 |---|---|---|---|
-| TC-A-1 | A-1 Approve deal > 10000 | User C creates deal 15000 (Qualification); User B approves in Workqueue > My Jobs > Approvals with comment "Approved for review stage." | Locked on save; pending for User B; after approval unlocked, Stage = Needs Analysis |
+| TC-A-1 | A-1 Approve deal > 10000 | User C creates deal 15000 (Qualification, Standard pipeline); User B approves in Workqueue > My Jobs > Approvals with comment "Approved for review stage." | Locked on save; pending for User B; after approval unlocked, Stage = Needs Analysis |
 | TC-A-2 | A-2 Reject deal > 10000 | User C creates deal 20000; User B rejects with comment; User C checks mail | Rejection email to record owner; record unlocked; Resubmit available; Stage unchanged |
 | TC-A-3 | A-3 Below threshold | User C creates deal 5000 | Saved normally, no approval |
 | TC-A-4 | Boundary 10000 | User C creates deal 10000 | No approval |
@@ -716,20 +721,20 @@ Jobs → Approvals** у User B (`C-3-BackInQueue.png`). Пояснення: пр
 | TC-B-3 | B-3 Non-Cold-Call lead | User C creates Web Download lead | Saved normally, no approval |
 | TC-B-4 | Source changed after create | Web Download lead edited to Cold Call | No approval (Create Record only) |
 | TC-C-1 | C-1 Edit country to non-US | User C creates contact (United States), edits to Germany; User B edits Mailing Address - Country / Region to Austria, approves | Locked after edit; only Mailing Address - Country / Region editable for User B; after approval value = Austria |
-| TC-C-2 | C-2 Rule admin takeover | Pending contact; admin uses Takeover on record page, approves | Takeover available to admin only; approval history shows admin; gone from User B's queue |
+| TC-C-2 | C-2 Rule admin takeover | Pending contact; admin uses Takeover on record page, approves | Takeover available to admin only; Timeline shows the approval by the Process Admin; gone from User B's queue |
 | TC-C-3 | C-3 Resubmission | User B rejects; User C clicks Resubmit | Record locked again; back in User B's queue |
 | TC-C-4 | Contact created non-US | User C creates contact with Germany | No approval (Edit Record only) |
 
 Під таблицею — вісім пунктів підсумкового чекліста, кожен позначений і з посиланням на TC ID.
 
 **15.13.** Перш ніж писати звіт, виключи налаштування й середовище: у процесі A в **Action on
-Rejection** справді є **Email Notifications**, адресовані Record Owner; власник запису — User C,
+Rejection** справді є **Email Notifications**, адресовані **Owner** угоди (**To → Deal → Owner**); власник запису — User C,
 а не адміністратор; скринька User C працює (прийшов лист-запрошення?) і лист не в спамі; сповіщення
 в CRM переглянуто під User C. Лише якщо все це так — дефект. Приклад звіту:
 
 - **Назва:** Rejection email notification is not delivered to the record owner (Scenario A).
 - **Середовище:** Zoho CRM, Zoho One trial, EU; process `High-Value Deal Review`.
-- **Передумови:** process active; Action on Rejection → Email Notifications to Record Owner;
+- **Передумови:** process active; Action on Rejection → Email Notifications to the Owner (To > Deal > Owner);
   User C is the owner; User C's mailbox receives other Zoho emails.
 - **Кроки:** 1. As User C create deal `A2-Reject-20000`, Amount 20000. 2. As User B reject it
   from Workqueue > My Jobs > Approvals with a comment. 3. As User C check mailbox, spam and CRM

@@ -49,8 +49,8 @@ wizards може користувач з дозволом **Modules Customizatio
 Wizard будується поверх layout: створюючи його, ти обираєш модуль і layout (до чотирьох), і всі
 поля, розділи та subforms цього layout з'являються у вкладці **Fields** дизайнера.
 
-**Екран** (screen) має **Screen name** і **Segment Title**. Перший екран — домашній (з іконкою
-будиночка); зробити домашнім інший екран можна з меню екрана.
+**Екран** (screen) має **Screen name** і розділ (section) з назвою в полі **Section Name**. Перший
+екран — домашній (з іконкою будиночка); зробити домашнім інший екран можна з меню екрана.
 
 **Fields.** Поля перетягуєш з вкладки **Fields** на екран. Обов'язкові поля — системні й ті, що
 зробили обов'язковими в layout, — показані там окремим списком, щоб їх не загубити. Там само
@@ -157,7 +157,8 @@ conditional rule** → **+Create Conditional Rule** → вікно **Conditional
   **Save as draft** у правому верхньому куті; для вебу вона місця кнопки не описує, хоча в
   інтерфейсі CRM є і напис «Save as draft», і повідомлення «Your record is being saved as draft» —
   де саме ця дія у вебі, перевір у тріалі. Мобільна довідка пише, що для чернетки досить заповнити
-  обов'язкові поля, тобто без них чернетку не зберегти; завдання очікує того самого у вебі;
+  обов'язкові поля, тобто без них чернетку не зберегти; у вебі тріалу не так: **Save as draft**
+  зберігає чернетку й з порожнім обов'язковим полем (зупиняється лише перехід на наступний екран);
 - **дії кнопок**: дії, налаштовані на кнопках екранів до моменту збереження чернетки, виконуються;
   чернетка зберігається і тоді, коли користувач натискає кнопку з дією (email, webhook, функція);
 - **завершення**: відкриваєш чернетку, дозаповнюєш, зберігаєш — запис з'являється в списку модуля і
@@ -205,7 +206,7 @@ layouts користувач усе одно може обрати вручну.
    | параметр | значення |
    |---|---|
    | Screen name | `General Information` |
-   | Segment Title | `Account Basics` |
+   | Section Name | `Account Basics` |
    | поля | **Account Name** (системне обов'язкове), **Phone**, **Account Type** |
    | кнопка 1 | `Proceed to Financials` → веде на Screen 2 |
 
@@ -218,7 +219,7 @@ layouts користувач усе одно може обрати вручну.
    | параметр | значення |
    |---|---|
    | Screen name | `Financial & Industry Details` |
-   | Segment Title | `Business Demographics` |
+   | Section Name | `Business Demographics` |
    | компонент | Text угорі екрана: `Please verify all financial data against public records before proceeding.` |
    | поля | **Industry**, **Annual Revenue**, **Website** |
    | кнопка 1 | `Proceed to Location` → веде на Screen 3 |
@@ -237,7 +238,7 @@ layouts користувач усе одно може обрати вручну.
    | параметр | значення |
    |---|---|
    | Screen name | `Location Details` |
-   | Segment Title | `Headquarters Address` |
+   | Section Name | `Headquarters Address` |
    | поля | **Billing Address** (складене поле: Country/Region, Flat/House No./Building/Apartment Name, Street Address, City, State/Province — у тріалі окремих полів Billing Street/City/State в переліку полів wizard немає, є тільки ціле **Billing Address**) |
    | кнопка 1 | `Submit Account`, прапорець **Use this button to save the record** |
 
@@ -290,7 +291,8 @@ Location** — помилка обов'язкового поля, далі не 
 **5. Негативний, Account Name.** Screen 1: Account Name порожнє → **Proceed to Financials**; потім
 спроба зберегти чернетку з порожнім Account Name.
 
-**Що побачиш:** обидві дії зупинені вимогою заповнити Account Name.
+**Що побачиш:** **Proceed to Financials** зупинено повідомленням *"Account Name cannot be empty."*;
+**Save as draft** не зупиняється — чернетку з порожнім Account Name збережено, вона є в **Drafts**.
 
 **6. Помилка конфігурації: петля.** Тестується в дизайнері. Додай на Screen 3 нову кнопку,
 наприклад `Back to Start`, і спробуй перетягнути з'єднання від неї на Screen 1.
@@ -380,7 +382,7 @@ Edit** — при редагуванні поле вже не блокуєтьс
 | при редагуванні акаунта правила не діють | тригер правила — Create |
 | «чернетка» з'явилась у списку Accounts | кнопка позначена Use this button to save the record |
 | чернеток немає в More → Drafts | чернетку не збережено або wizard деактивували |
-| не зберігається чернетка з порожнім Account Name | так і має бути: для чернетки потрібні обов'язкові поля |
+| чернетка зберіглась з порожнім Account Name | так поводиться тріал: **Save as draft** не перевіряє обов'язкові поля — їх вимагає лише перехід на наступний екран |
 
 ---
 
@@ -396,7 +398,7 @@ Edit** — при редагуванні поле вже не блокуєтьс
    з винятками для профілів.
 6. Чернетку зберігає вбудована кнопка **Save as draft**, яка сама стоїть поряд із **Cancel** на
    кожному екрані готового wizard — дизайнер її не малює; знайти чернетку можна в **More → Drafts**
-   модуля. Обов'язкові поля потрібні і для неї.
+   модуля. Обов'язкові поля для неї не перевіряються — їх вимагає лише перехід далі.
 7. Деактивація чи видалення wizard знищує його чернетки.
 8. Validation rules працюють і в wizard; layout rules там замінюють conditional rules.
 9. Wizard працює тільки для ручного створення: вебформи, імпорт і API його оминають.
@@ -425,12 +427,12 @@ Edit** — при редагуванні поле вже не блокуєтьс
 
 **11.3.** *(конфігурація)* Потрібні права Modules Customization. У **Setup → Customization →
 Wizards** натисни **Create Wizard**, обери модуль Accounts і тип Blank. Screen 1
-`General Information`, Segment Title `Account Basics`, поля Account Name (системне обов'язкове),
+`General Information`, Section Name `Account Basics`, поля Account Name (системне обов'язкове),
 Phone, Account Type. Кнопка: `Proceed to Financials` — веде на Screen 2. Другу кнопку для чернетки
 не додавай — поясни, чому і де тоді користувач знайде можливість зберегти чернетку.
 
 **11.4.** *(конфігурація)* Потрібен wizard на Accounts з Screen 1, де є кнопка
-`Proceed to Financials`. Створи Screen 2 `Financial & Industry Details`, Segment Title
+`Proceed to Financials`. Створи Screen 2 `Financial & Industry Details`, Section Name
 `Business Demographics`: угорі Text component
 `Please verify all financial data against public records before proceeding.`, поля Industry,
 Annual Revenue, Website; кнопка `Proceed to Location` — веде на Screen 3.
@@ -442,7 +444,7 @@ Display) — якщо Account Type (зі Screen 1) = `Partner`, показати
 Revenue від ручного редагування. Поясни, чому обидва правила стоять саме на Screen 2.
 
 **11.6.** *(конфігурація)* Потрібен wizard з Screen 2 і кнопкою `Proceed to Location`. Створи
-Screen 3 `Location Details`, Segment Title `Headquarters Address`, поле `Billing Address`, кнопку
+Screen 3 `Location Details`, Section Name `Headquarters Address`, поле `Billing Address`, кнопку
 `Submit Account`, що зберігає запис. Переконайся, що поля не
 повторюються між екранами і немає петель; збережи wizard і дай доступ потрібним профілям.
 
@@ -464,7 +466,8 @@ Screen 1 змушує поле Website з'явитися на Screen 2, а сп�
 **11.10.** *(виконання, негативний)* Потрібен wizard `Corporate Account Onboarding` на Accounts:
 Screen 1 з Account Name і кнопкою `Proceed to Financials`. Залиш Account Name на Screen 1
 порожнім і натисни **Proceed to Financials**, потім спробуй зберегти чернетку. Система має зупинити
-обидві дії. Запиши фактичні повідомлення.
+**Proceed to Financials**, а **Save as draft** — ні: чернетка зберігається й з порожнім полем. Запиши
+фактичні повідомлення.
 
 **11.11.** *(спроєктувати)* Таблиця завдання не покриває негативні сторони правил, редагування і
 права. Спроєктуй п'ять додаткових тест-кейсів (ID, назва, передумови, кроки, очікуваний результат):
@@ -504,13 +507,13 @@ Drafts.
 
 **11.3.** **Create Wizard** → Wizard Name `Corporate Account Onboarding`, Module Accounts, layout
 Accounts, **Blank** → **Next**. Подвійний клік → Screen 1: Screen name `General Information`,
-Segment Title `Account Basics`; з **Fields** перетягнути Account Name, Phone, Account Type.
+Section Name `Account Basics`; з **Fields** перетягнути Account Name, Phone, Account Type.
 **+ Button → Button** → `Proceed to Financials` (з'єднаєш зі Screen 2, коли його створиш). Другої
 кнопки не додавай: чернетка — не кнопка, яку малює дизайнер, а вбудована **Save as draft**, яка сама
 з'являється поряд із **Cancel** на кожному екрані готового wizard і зберігає введене в **Drafts**.
 
 **11.4.** Від `Proceed to Financials` перетягнути курсор на полотно → Screen 2: Screen name
-`Financial & Industry Details`, Segment Title `Business Demographics`. **Components** → Text угорі
+`Financial & Industry Details`, Section Name `Business Demographics`. **Components** → Text угорі
 з текстом `Please verify all financial data against public records before proceeding.`
 **Fields** → Industry, Annual Revenue, Website. **+ Button → Button** → `Proceed to Location`.
 
@@ -525,7 +528,7 @@ Segment Title `Account Basics`; з **Fields** перетягнути Account Nam
 Чому на Screen 2: дії правила діють тільки на екрані, де правило стоїть, а Website і Annual Revenue
 — на Screen 2. Умова Rule A бере поле зі Screen 1 — так можна: у списку умов є поля інших екранів.
 
-**11.6.** Від `Proceed to Location` → Screen 3: `Location Details`, Segment Title `Headquarters
+**11.6.** Від `Proceed to Location` → Screen 3: `Location Details`, Section Name `Headquarters
 Address`, поле `Billing Address`; **+ Button → Button** → `Submit Account` з прапорцем **Use this
 button to save the record**. Перевірити: кожне поле рівно на одному екрані; шлях 1 → 2 → 3 →
 збереження. **Save Wizard** → діалог **Permission** → профілі. Wizard активний у списку.
@@ -548,8 +551,9 @@ Location** з порожнім Website — помилка, Screen 3 не від�
 Rule B: після `Government/Military` Annual Revenue не приймає ввід з клавіатури. На відео мають бути
 видні вибір значень, поява і блокування полів, помилка обов'язкового поля.
 
-**11.10.** Порожнє Account Name: **Proceed to Financials** не веде на Screen 2, видно вимогу
-заповнити поле; збереження чернетки теж не проходить — для чернетки потрібні обов'язкові поля.
+**11.10.** Порожнє Account Name: **Proceed to Financials** не веде на Screen 2, видно
+*"Account Name cannot be empty."*; **Save as draft** не зупиняється — чернетку з порожнім Account Name
+збережено, вона в **Drafts**.
 Запиши точні тексти.
 
 **11.11.**
@@ -575,7 +579,7 @@ Drafts з чернеткою. Wizard не вимикай і не видаляй,
 - [ ] пояснюєш, яку проблему вирішує wizard і чим він відрізняється від layout rules, Kiosk Studio
   і blueprint;
 - [ ] знаєш, що wizard бере поля з layout і не працює для вебформ, імпорту й API;
-- [ ] будуєш екрани з Screen name, Segment Title, полями і Text component без підглядання;
+- [ ] будуєш екрани з Screen name, Section Name, полями і Text component без підглядання;
 - [ ] налаштовуєш кнопки: перехід на екран, збереження запису, видимість;
 - [ ] перелічуєш правила коректної схеми і за назвою помилки Save Wizard кажеш, що не так;
 - [ ] налаштовуєш conditional rule з умовою з іншого екрана і пояснюєш, де діють його дії;
