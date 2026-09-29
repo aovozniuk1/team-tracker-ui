@@ -259,8 +259,7 @@ Sequential із двох етапів — буде.
 - У Contacts є поле **Mailing Address - Country / Region** (у тріалі є).
 
 **3.3. Доступ до погоджень.** **Setup** (шестерня вгорі праворуч) **→ Process Management → Approval
-Processes** відкривається. Якщо розділу нема — перевір, чи твоя редакція й профіль його
-підтримують.
+Processes** відкривається. Якщо розділу нема — зупинись і напиши ментору.
 
 **Ще дві речі перед стартом:**
 - подивись список процесів: якщо для Deals, Leads чи Contacts уже є процеси з твоїх експериментів,
@@ -560,8 +559,7 @@ CRM: User B (погоджувач) і User C (власник записів).*
   і профіль, обидва активні й підтверджені;
 - Leads, Contacts і Deals видно в навігації; у Deals є **Amount**; у **Lead Source** є `Cold Call`;
   у Contacts є **Mailing Address - Country / Region**;
-- **Setup → Process Management → Approval Processes** доступний (якщо ні — перевір редакцію і
-  профіль).
+- **Setup → Process Management → Approval Processes** доступний (якщо ні — напиши ментору).
 
 **14.6.** *(A17, сценарій A)* Налаштуй процес: **Module** `Deals`, **Approval Process Name**
 `High-Value Deal Review`, **Description** `Requires approval for any deal with an amount exceeding

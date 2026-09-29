@@ -154,8 +154,8 @@ Reporter, Module, дата подання), а **Status, Severity, Is it Reprodu
 вкладці Date & Time Settings — робочі дні й вихідні (так описує довідка). План Enterprise дозволяє
 до трьох робочих календарів. У тріалі розклад за замовчуванням називався
 `Standard Business Hours`, з режимом «Same hours every day»: за графіком у редакторі — Пн–Пт
-приблизно 09:00–18:00, Сб і Нд без робочих годин. Годинник рахує в часовому поясі твого порталу (видно в
-**Setup → Portal Configuration → Configuration**, поле Time Zone; у тріалі, де перевіряли курс, — Europe/Kyiv). Кожен проєкт показує свій
+приблизно 09:00–18:00, Сб і Нд без робочих годин. Часовий пояс порталу — **Europe/Kyiv** (видно в
+**Setup → Portal Configuration → Configuration**, поле Time Zone). Кожен проєкт показує свій
 календар у власній картці (Project Information → Business Hours) — у тестового проєкту це той самий
 `Standard Business Hours`. Яким саме календарем користується SLA, коли їх кілька, довідка не каже.
 
