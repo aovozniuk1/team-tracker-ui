@@ -314,8 +314,8 @@ Business rule**.
 Новий тег через форму issue в тріалі не створюється — критерій
 `Tags` лишиться без значення, доки такого тега не існує. Онови критерій на «similar custom
 field/flag»: створи власне поле: **Setup → Customization → Layouts → Issues** → layout свого проєкту →
-перетягни з **New Fields** поле типу Checkbox, назви його `Client Escalation` → **Add to Layout** →
-**Save Layout**. Критерій стане «`Client Escalation` відмічено». Власні поля issue — функція плану
+перетягни з **New Fields** поле типу Checkbox і назви його `Client Escalation` — редактор збереже його
+сам. Критерій стане «`Client Escalation` відмічено». Власні поля issue — функція плану
 Enterprise. Заміну обов'язково запиши у звіт.
 
 ### Крок 3. Actions

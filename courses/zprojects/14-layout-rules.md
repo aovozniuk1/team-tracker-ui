@@ -222,8 +222,8 @@ rules created yet.» і показує кнопку **New Layout Rule**, яка 
 
 1. **Layout.** **Setup → Customization → Layouts → Task → Create Layout**, базовий
    `Standard Layout`, **Layout Name** — із завдання.
-2. **Поля.** У редакторі: тип із **New Fields** → назва і значення → **Add to Layout**; наприкінці
-   **Save Layout**. Три поради:
+2. **Поля.** У редакторі: тип із **New Fields** → назва і значення. Редактор зберігає кожне поле сам,
+   окремих кнопок **Add to Layout** і **Save Layout** немає. Три поради:
    - збери поля завдання в одну секцію з нормальною назвою, а не в `Untitled Section`;
    - **не став Mandatory у властивостях** полів, якими керують правила: обов'язковість задають
      правила, а обов'язкове поле ще й не вимкнеш;
@@ -276,7 +276,7 @@ rules created yet.» і показує кнопку **New Layout Rule**, яка 
 ### Покроково
 
 1. Layout `Risk Assessment Layout` на основі `Standard Layout`; секція `Risk Details` з шістьма
-   полями; **Save Layout**.
+   полями (редактор зберігає їх сам).
 2. Проєкт `Layout QA – Risk` на цьому layout (галочку приватної копії знято).
 3. **Rule 1:** **New Layout Rule** → **Rule Name** `RA Rule 1 – High or Critical` → layout
    `Risk Assessment Layout` → **Conditional** → **Execute On**: створення і оновлення (уже
@@ -777,8 +777,8 @@ issue: умовне — якщо Severity = `Critical`, Due Date стає обо
 **14.3.**
 1. **Setup → Customization → Layouts → Task → Create Layout** → базовий `Standard Layout` →
    **Layout Name** `Risk Assessment Layout` → **Create**.
-2. Відкрий layout; додай секцію `Risk Details`; з **New Fields** — шість полів з таблиці, кожне
-   **Add to Layout**; Mandatory і значень за замовчуванням не став; **Save Layout**.
+2. Відкрий layout; додай секцію `Risk Details`; з **New Fields** — шість полів з таблиці (редактор
+   зберігає їх сам); Mandatory і значень за замовчуванням не став.
 3. **Projects → New Project → Blank project** → `Layout QA – Risk` → **Task Layout**
    `Risk Assessment Layout`, галочку **Create a private copy of this layout** знято → створи
    проєкт.
@@ -853,7 +853,7 @@ field). Очікування ті самі.
 | `Engineering` + `Git`, потім `Sales` | список показує лише `CRM Training`, `Product Demos` | що сталося з `Git`: очищено, лишилось, блок збереження |
 
 **14.7.** Layout `Incident Resolution Layout`, секція `Incident Details`, сім полів за умовою без
-Mandatory і дефолтів, **Save Layout**. Проєкт `Layout QA – Incident` на цьому layout, галочку
+Mandatory і дефолтів. Проєкт `Layout QA – Incident` на цьому layout, галочку
 приватної копії знято.
 
 **14.8.** Усі правила на layout `Incident Resolution Layout`; умовні — з **Execute On** на
