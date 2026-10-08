@@ -2390,7 +2390,14 @@
   function vCourses() {
     const { wait, ix } = pubState(); if (wait) return wait;
     return `${pubHead()}<div class="page-head"><div><h1>Zoho: курси онбордингу</h1><div class="sub">Покрокові курси з Zoho CRM і Zoho Projects: пояснення, прохід завдань у продукті, розбір з боку QA, задачі й розв'язки. Вхід не потрібен.</div></div></div>
-      <div class="pub-courses">${ix.courses.map(c => `<div class="card clickable" data-href="#/courses/${esc(c.id)}"><h3><a href="#/courses/${esc(c.id)}">${esc(c.name)}</a></h3><p class="small">${esc(c.description)}</p><div class="small muted">Фаз: ${c.phases.length} · уроків: ${pubLessons(c).length}</div></div>`).join('')}</div>`;
+      <div class="pub-courses">${ix.courses.map(c => `<div class="card clickable" data-href="#/courses/${esc(c.id)}"><h3><a href="#/courses/${esc(c.id)}">${esc(c.name)}</a></h3><p class="small">${esc(c.description)}</p><div class="small muted">Фаз: ${c.phases.length} · уроків: ${pubLessons(c).length}</div></div>`).join('')}${ownCards(ix)}</div>`;
+  }
+  // the lead's own courses that carry a card show here for the lead only, next to the public ones
+  function ownCards(ix) {
+    return ownCourses().filter(c => c.card && !ix.courses.some(p => p.id === c.id)).map(c => {
+      const first = lessonsOf(c)[0], href = first ? `#/lesson/${esc(c.id)}/${esc(first.id)}` : `#/learning/${esc(c.id)}`;
+      return `<div class="card clickable" data-href="${href}"><h3><a href="${href}">${esc(c.card.name || c.name)}</a> <span class="pill">лише для тебе</span></h3><p class="small">${esc(c.card.description || '')}</p><div class="small muted">Уроків: ${lessonsOf(c).length}${c.drill ? ` · <a href="#/drill/${esc(c.id)}">Тренування на флешкартках</a>` : ''}</div></div>`;
+    }).join('');
   }
   function vCourse(cid) {
     const { wait, ix } = pubState(); if (wait) return wait;
