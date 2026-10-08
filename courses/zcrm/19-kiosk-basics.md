@@ -5,6 +5,43 @@
 оновлює лід кнопкою з його картки. Для QA тут головне: кіоск за кілька кліків змінює справжні
 записи і надсилає справжні листи — навіть тоді, коли ти його лише пробуєш.*
 
+## Коротко
+
+*Картка уроку: прочитай її перед уроком і повернись до неї після.*
+
+**Одним реченням.** Кіоск — no-code міні-застосунок у CRM: людина проходить екрани, а кіоск розгалужується й виконує дії в записах.
+
+**Навіщо.** Дані й дії розкидані по екранах і модулях; кіоск зводить їх в один керований потік.
+
+**Де.** **Setup → Customization → Kiosk Studio**; кнопка — **Setup → Customization → Modules and Fields** → модуль → **Buttons** → **Create New Button**, дія **Kiosk**.
+
+**Модель**
+
+- **Screen** — що бачить людина: текст, поля кіоска, кнопки (кожна — гілка).
+- **Decision** — розвилка за даними; default path є завжди.
+- **Action** — дія в CRM без власного екрана: Field Update, Add Note…
+- **Current Record** — запис, з якого відкрили кіоск; з Home page чи Setup — порожній.
+- **Merge from module** — поле показує відоме значення (вибір через `#`); дозволяє Read only.
+
+**Запам'ятай**
+
+1. Поля кіоска — не поля CRM: у запис дані потрапляють лише через дію.
+2. Спершу задай модуль (**CurrentRecord Module**): без нього Current Record нема ні в `#`, ні в діях.
+3. Працює лише опублікований і активний кіоск; видалити чи деактивувати — лише ніде не розміщений.
+4. **Test Run** виконує дії насправді: лише тестові записи, краще — у sandbox.
+5. **Field Update** оновлює одне поле за дію й не пропонує Description; друге поле — друга дія.
+
+**Пастки** (симптом → причина)
+
+- **Configured Kiosk** → **Choose** показує «No active Kiosks found» → кіоск ще не опубліковано.
+- Кнопки з кіоском нема на картці → **Select Page** = In List або профіль не обрано в **Select Profile(s)**.
+- Після Cancel запис змінився → дію поставлено на гілку кнопки Cancel.
+
+**Як перевірити**
+
+- Відкрий кіоск із ліда А: видно ім'я А; після збереження змінився лише А, лід Б — ні.
+- Запиши значення до, заповни поля й натисни Cancel — запис лишився без змін.
+
 ---
 
 ## 19.1. Яку проблему розв'язує Kiosk Studio
@@ -533,7 +570,7 @@ module.
    6. переконайся, що Home page можна налаштовувати (який вид відкрито зараз і чи можна його змінювати).
    Запиши результат кожного пункту одним рядком.
 
-**19.6.** Створи кіоск `LC_QuickUpdate`: Kiosk Name `LC_QuickUpdate`, Unified API Name на твій
+**19.6.** Створи кіоск `LC_QuickUpdate`: Kiosk Name `LC QuickUpdate` (підкреслення поле не приймає), Unified API Name на твій
 вибір, Description `Post-call status update and note entry for recruiter use.` Задай модуль Leads.
 Поясни, навіщо модуль, якщо завдання про нього не пише.
 
@@ -623,7 +660,7 @@ Single Line.
       переходь на User's Home Page або готуй Customized Home Page — Classic View не налаштовується.
 
 **19.6.** Шлях: **Setup → Customization → Kiosk Studio** → **Get Started** (або **Create Kiosk**) →
-вікно Create Kiosk: Kiosk Name `LC_QuickUpdate`, Unified API Name, наприклад `LC_QuickUpdate`,
+вікно Create Kiosk: Kiosk Name `LC QuickUpdate` (з пробілом: `_` поле не приймає), Unified API Name, наприклад `LC_QuickUpdate`,
 Description → **Next**. У лівій панелі джерел даних → **CurrentRecord** → модальне вікно
 «CurrentRecord Module» → **Leads**. Модуль потрібен, щоб з'явилася змінна Current Record: без неї
 поле Lead Name не отримає Lead Name через `#`, а дія Field Update не зможе оновити запис, з якого

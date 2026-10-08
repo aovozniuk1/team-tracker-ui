@@ -5,6 +5,43 @@ pipeline — і прив'язати blueprint лише до одного з ни
 ізольовані. Помилка ізоляції не показує червоного повідомлення: вона тихо пускає угоду не тим
 шляхом, і знаходить її тільки той, хто перевіряє це навмисно.*
 
+## Коротко
+
+*Картка уроку: прочитай її перед уроком і повернись до неї після.*
+
+**Одним реченням.** Два процеси продажу в Deals розводять трьома вкладеними важелями: layout — поля, pipeline — стадії, blueprint — рух між ними.
+
+**Навіщо.** Окремий модуль розірвав би звітність; так звіти спільні, а процеси ізольовані.
+
+**Де.** **Setup → Customization → Modules and Fields → Deals → Layouts**; **Setup → Customization → Pipelines**; **Setup → Process Management → Blueprint**.
+
+**Модель**
+
+- **Layout → Pipeline → Stage** — вкладений ланцюжок; ізоляція — на кожній ланці.
+- **Layout** — розділи й поля угоди та їхня обов'язковість.
+- **Pipeline** — упорядкований набір стадій; лише в Deals; належить одному layout.
+- **Стадія** — **Probability**, **Record Category**, **Forecast Category**; одні значення в усіх pipelines.
+- **Умова входу** — з якої стадії угода потрапляє в blueprint.
+
+**Запам'ятай**
+
+1. Ймовірність і категорії належать стадії, не pipeline: зміна діє всюди, де ця стадія є.
+2. Перший pipeline створює **Standard** з наявними угодами й Stage-blueprints; відкотити непросто — краще в sandbox.
+3. Ізоляцію полів дає лише склад layout; field permission діє на всі layouts модуля.
+4. Клон layout забирає всі поля: клонуй, поки в джерелі немає полів іншого процесу.
+5. Stage-blueprint у layout з pipelines прив'язаний до одного pipeline; **Choose Pipeline** підставляє **Standard** — міняй вручну.
+
+**Пастки** (симптом → причина)
+
+- В угоді видно поля іншого процесу → layout клоновано вже з ними.
+- У полі **Pipeline** є чужий pipeline → pipeline створено з не тим **Layout**.
+- **Stage** заблоковане, кнопок немає → угода в blueprint у стадії без переходів (бракує умови входу) або ти не власник.
+
+**Як перевірити**
+
+- Ізоляція: в угоді іншого layout — лише свої поля, pipeline і стадії; blueprint не спрацьовує.
+- Регресія: після зміни ймовірності стадії перевір **Standard** і наявні угоди (**Probability**, **Expected Revenue**).
+
 ---
 
 ## 9.1. Задача: два процеси в одному модулі
@@ -51,9 +88,9 @@ Zoho пропонує обрати layout, з якого його клонува
 | присутність поля на формі | layout | нема поля в layout — його не видно в угодах цього layout |
 | обов'язковість та інші властивості поля | layout | Software Tier може бути обов'язковим в одному layout і відсутнім в іншому |
 | доступ до поля за профілем (field permission) | модуль, **не** layout | зміна діє на всі layouts модуля, тож для ізоляції процесів не годиться |
-| доступ до layout за профілем | layout | після **Save Layout** Zoho питає профілі у вікні **Layout Permission** |
+| доступ до layout за профілем | layout | після **Save** Zoho питає профілі у вікні **Layout Permission** |
 
-Поле, яке прибрали з layout, не зникає з CRM: воно йде в **Unused Fields** цього layout і
+Поле, яке прибрали з layout, не зникає з CRM: воно йде в **Unused Items** цього layout і
 повертається звідти перетягуванням разом з даними. Коли в модулі з'являється другий layout, у
 записів з'являється системне поле **Layout** — за ним фільтрують списки і будують умови. Угоди, які
 існували раніше, лишаються в Standard layout.
@@ -155,8 +192,9 @@ pipeline відкрий список і подивись. У тріалі, де 
 стан, кнопки доступних переходів і посилання **View configured actions**. Клік по кнопці відкриває
 вікно переходу з усім, що налаштовано в During. Коли запис доходить до стану, з якого немає
 переходів, процес для нього закінчується: смуга blueprint зникає, поле знову вільне (так поводиться
-blueprint на лідах у sandbox тріалу; для угод перевір сам). Переходи, що чекають саме на тебе,
-збираються в **Workqueue → My Jobs → Blueprint**.
+blueprint на лідах у sandbox тріалу; для угод перевір сам). За довідкою, переходи, що чекають саме на
+тебе, збираються в **Workqueue → My Jobs → Blueprint**; у тріалі цей розділ показував лише стартовий
+екран Workqueue (урок 8), тож перевір сам.
 
 ### Чотири речі, які ламають тести
 
@@ -179,7 +217,8 @@ blueprint на лідах у sandbox тріалу; для угод переві�
    workflow і в CommandCenter (workflow rule — правило, яке саме оновлює поля за подією; field
    update — його дія «записати значення в поле»). Для людини у формі поле заблоковане, для
    автоматизації — ні. Порядок виконання автоматизацій у Zoho: assignment rules → workflow rules →
-   approval process → Blueprint → case escalation rules.
+   approval process → Blueprint → case escalation rules. Повний ланцюг — з рев'ю, scoring і connected
+   workflows — в уроках 12–14.
 
 ### Налаштування переходу: що де
 
@@ -222,7 +261,7 @@ Mandatory або Optional. За замовчуванням усе, що ти д�
    | `Current Contract Expiry` | Date | — | так |
    | `Churn Risk Profile` | Pick List | `Low`, `Medium`, `High`, `Critical` | ні |
 
-5. **Save Layout**. У вікні **Layout Permission** відміть профілі, яким потрібен цей layout:
+5. **Save**. У вікні **Layout Permission** відміть профілі, яким потрібен цей layout:
    щонайменше Administrator і профілі тестових користувачів.
 6. Поверніся в `Enterprise Net-New`, створи розділ `Technical & Implementation Details` і додай:
 
@@ -232,7 +271,7 @@ Mandatory або Optional. За замовчуванням усе, що ти д�
    | `Target Go-Live Date` | Date | — | ні |
    | `Implementation Required` | Checkbox | — | ні |
 
-7. **Save Layout**.
+7. **Save**.
 
 **Що побачиш:** при створенні угоди Zoho тепер питає, в якому layout її створити; у `Client
 Renewals` немає розділу Technical & Implementation Details, а в `Enterprise Net-New` — розділу
@@ -244,8 +283,8 @@ Retention Metrics.
 полі Stage є blueprint, значення picklist узагалі не редагуються. Нові стадії створюй через
 **Create New Stage**.
 
-Що легко відкотити: назву layout, розміщення полів (прибране поле йде в **Unused Fields**),
-обов'язковість. Що ні: видалення поля з **Unused Fields** — разом з ним зникають дані.
+Що легко відкотити: назву layout, розміщення полів (прибране поле йде в **Unused Items**),
+обов'язковість. Що ні: видалення поля з **Unused Items** — разом з ним зникають дані.
 
 ## 9.6. Покроково: Step 2 — pipelines
 
@@ -650,15 +689,15 @@ pipeline вимагає перенести відкриті угоди, blueprin
    `Enterprise Net-New` → зберегти.
 2. **Create New Layout** → клон з `Enterprise Net-New` → назва `Client Renewals` → розділ
    `Retention Metrics`: `Current Contract Expiry` (Date, **Mark as required**), `Churn Risk Profile`
-   (Pick List: Low, Medium, High, Critical) → **Save Layout** → **Layout Permission**: Administrator
+   (Pick List: Low, Medium, High, Critical) → **Save** → **Layout Permission**: Administrator
    і тестові профілі.
 3. `Enterprise Net-New` → розділ `Technical & Implementation Details`: `Software Tier` (Pick List:
    Basic, Professional, Enterprise, **Mark as required**), `Target Go-Live Date` (Date),
-   `Implementation Required` (Checkbox) → **Save Layout**.
+   `Implementation Required` (Checkbox) → **Save**.
 
 Результат: форма Enterprise Net-New має Technical & Implementation Details і не має Retention
 Metrics; Client Renewals — навпаки. Якщо Client Renewals створено пізніше, клоном вже зміненого
-layout, прибери з нього розділ Technical & Implementation Details (поля підуть в Unused Fields
+layout, прибери з нього розділ Technical & Implementation Details (поля підуть в Unused Items
 цього layout) і перевір форму ще раз.
 
 **9.4.**

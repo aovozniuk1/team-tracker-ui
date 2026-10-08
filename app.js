@@ -2173,7 +2173,7 @@
     const enrollBtn = !canSeeHistory() ? '' : !own ? `<button class="btn primary" data-act="enroll-any" data-course="${esc(c.id)}">Enroll someone</button>`
       : me && !enrolled.some(p => p.id === me) ? `<button class="btn primary" data-act="enroll-me" data-course="${esc(c.id)}">Enroll me</button>` : '';
     return `<div class="page-head"><div><h1>Learning</h1><div class="sub">${cs.length} course${cs.length === 1 ? '' : 's'} · tap a cell in your own row to advance its status; right-click, shift-click or long-press it to set a note or date · everyone marks only their own lessons${canSeeHistory() ? '' : ' · only your own progress is shown'}</div></div>
-      <div class="actions">${enrollBtn}</div></div>
+      <div class="actions">${own && c.drill ? `<a class="btn" href="#/drill/${esc(c.id)}">Drill</a>` : ''}${enrollBtn}</div></div>
       <div class="tabs">${cs.map(x => `<button class="${x.id === c.id ? 'active' : ''}" data-href="#/learning/${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>
       <div class="card" style="margin-bottom:14px"><h3>${esc(c.name)} <span class="pill">${esc(c.audience || '')}</span></h3><p class="small">${esc(c.description || '')}</p>
         <dl class="kv"><dt>Where</dt><dd class="mono small">${esc(c.path || '')}</dd><dt>Lessons</dt><dd>${ls.filter(counted).length}${ls.length > ls.filter(counted).length ? ` + ${ls.length - ls.filter(counted).length} extra (supplements, practicum)` : ''} in ${(c.phases || []).length} phases</dd>${c.language ? `<dt>Language</dt><dd>${esc(c.language)}</dd>` : ''}</dl>
@@ -2191,22 +2191,24 @@
   // private repository (courses/<course>/<file>), so they reach nobody the log does not reach.
   S.lessons = Object.create(null);
   const LESSON_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/;
-  async function fetchLesson(c, l) {
-    if (!/^[a-z0-9-]+$/.test(c.id) || !LESSON_FILE.test(l.file || '')) throw new Error('this lesson has no file');
+  const DRILL_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
+  async function fetchCourseFile(c, file) {
+    if (!/^[a-z0-9-]+$/.test(c.id) || !(LESSON_FILE.test(file || '') || DRILL_FILE.test(file || ''))) throw new Error('this course has no such file');
     if (S.backend === 'github') {
       const g = ghConfig();
-      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(LOG_REPO)}/contents/courses/${c.id}/${encodeURIComponent(l.file)}?ref=${encodeURIComponent(g.branch)}`,
+      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(g.owner)}/${encodeURIComponent(LOG_REPO)}/contents/courses/${c.id}/${encodeURIComponent(file)}?ref=${encodeURIComponent(g.branch)}`,
         { headers: { ...ghHeaders(), Accept: 'application/vnd.github.raw' }, cache: 'no-store' });
       if (!r.ok) throw new Error(await ghError(r));
       return r.text();
     }
     if (S.server) {
-      const r = await fetch(`/api/_lesson/${c.id}/${encodeURIComponent(l.file)}`, { cache: 'no-store' });
-      if (!r.ok) throw new Error(r.status === 404 ? 'the lesson file is not there' : `the server answered ${r.status}`);
+      const r = await fetch(`/api/_lesson/${c.id}/${encodeURIComponent(file)}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status === 404 ? 'the file is not there' : `the server answered ${r.status}`);
       return r.text();
     }
     throw new Error('lessons open through GitHub or the local server');
   }
+  const fetchLesson = (c, l) => fetchCourseFile(c, l.file);
   function wantLesson(c, l) {
     const key = `${c.id}/${l.id}`;
     if (key in S.lessons) return;
@@ -2237,8 +2239,125 @@
     else if (st.error) body = `<div class="empty">The lesson could not be read: ${esc(st.error)}.</div>`;
     else { const md = renderMarkdown(st.text); body = `${md.toc.filter(h => h.level === 2).length > 2 ? tocHtml(md.toc) : ''}<article class="lesson-body">${md.html}</article>`; }
     return `<div class="page-head"><div><div class="sub"><a href="#/learning/${esc(c.id)}">${esc(c.name)}</a> · ${esc(l.phaseName || '')} · lesson ${i + 1} of ${ls.length}</div>${pr && pr.note && enrolled ? `<div class="small muted">Your note: ${esc(pr.note)}</div>` : ''}</div>
-      <div class="actions lesson-mark">${mark}</div></div>${nav}${body}${nav}`;
+      <div class="actions lesson-mark">${c.drill ? `<a class="btn sm" href="#/drill/${esc(c.id)}">Drill</a>` : ''}${mark}</div></div>${nav}${body}${nav}`;
   }
+
+  // ---------- the lead's flash-card drill: an own course may name a cards file ("drill": "<file>.json")
+  // kept beside its lessons in the private repository. The schedule stays in this browser only.
+  // The schedule itself is pure so tools/test_drill.js can lift it: a card you remember moves one box
+  // up and comes back after 1, 3, 7, 14, then 30 days; a card you miss goes back to box 0 and comes
+  // back the same day; new cards open at most `limit` a day.
+  function drillQueue(cards, state, lessons, day, limit, rand) {
+    const pick = cards.filter(c => !lessons || lessons.includes(c.lesson));
+    const st = (state && state.cards) || {};
+    const opened = state && state.intro && state.intro.day === day ? state.intro.n : 0;
+    const due = pick.filter(c => st[c.id] && st[c.id].d <= day).map(c => c.id);
+    for (let i = due.length - 1; i > 0; i--) { const j = Math.floor((rand || Math.random)() * (i + 1)); [due[i], due[j]] = [due[j], due[i]]; }
+    return due.concat(pick.filter(c => !st[c.id]).slice(0, Math.max(0, limit - opened)).map(c => c.id));
+  }
+  function drillGrade(state, id, ok, day) {
+    const DAYS = [0, 1, 3, 7, 14, 30];
+    const s = { ...(state || {}), cards: { ...((state && state.cards) || {}) } };
+    s.intro = state && state.intro && state.intro.day === day ? { ...state.intro } : { day, n: 0 };
+    let k = s.cards[id];
+    if (k) k = { ...k }; else { k = { b: 0, d: day }; s.intro.n++; }
+    if (ok) {
+      k.b = Math.min(k.b + 1, DAYS.length - 1);
+      const t = new Date(`${day}T12:00:00Z`); t.setUTCDate(t.getUTCDate() + DAYS[k.b]); k.d = t.toISOString().slice(0, 10);
+    } else { k.b = 0; k.d = day; }
+    s.cards[id] = k;
+    return s;
+  }
+  S.drills = Object.create(null);
+  S.drill = null;
+  const DRILL_NEW = 15;
+  const drillKey = cid => `${LS}drill-${cid}`;
+  function drillLoad(cid) {
+    try { const s = JSON.parse(localStorage.getItem(drillKey(cid)) || 'null'); if (s && typeof s === 'object' && s.cards && typeof s.cards === 'object') return s; } catch { /* nothing kept */ }
+    return { cards: {}, intro: { day: '', n: 0 }, deck: 'all' };
+  }
+  function drillKeep(cid, s) { try { localStorage.setItem(drillKey(cid), JSON.stringify(s)); return true; } catch { return false; } }
+  function wantDrill(c) {
+    if (c.id in S.drills) return;
+    S.drills[c.id] = { loading: true };
+    fetchCourseFile(c, c.drill).then(text => {
+      const d = JSON.parse(text);
+      if (!d || !Array.isArray(d.cards) || !d.cards.length) throw new Error('the cards file holds no cards');
+      return { data: { blocks: Array.isArray(d.blocks) ? d.blocks : [], cards: d.cards, course: d.course || '', byId: Object.fromEntries(d.cards.map(x => [x.id, x])) } };
+    }).catch(e => ({ error: (e && e.message) || 'unknown error' })).then(res => {
+      S.drills[c.id] = res;
+      if (S.route.name === 'drill' && S.route.id === c.id) render();
+    });
+  }
+  const drillLessons = (data, deck) => deck === 'all' ? null : ((data.blocks[+String(deck).slice(1)] || {}).lessons || []);
+  function drillStart(cid, deck, free) {
+    const st = S.drills[cid]; if (!st || !st.data) return;
+    const s = drillLoad(cid), lessons = drillLessons(st.data, deck);
+    const queue = free
+      ? drillQueue(st.data.cards, { cards: {} }, lessons, today(), Infinity)
+      : drillQueue(st.data.cards, s, lessons, today(), DRILL_NEW);
+    if (free) for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; }
+    S.drill = { cid, deck, queue, shown: false, free: !!free, asking: false };
+  }
+  function drillAnswer(ok) {
+    const dr = S.drill; if (!dr || !dr.shown || !dr.queue.length) return;
+    const id = dr.queue.shift();
+    if (!dr.free) {
+      const s = drillGrade(drillLoad(dr.cid), id, ok, today());
+      s.deck = dr.deck;
+      if (!drillKeep(dr.cid, s)) toast('The schedule could not be kept in this browser', 4000);
+    }
+    if (!ok) dr.queue.push(id);
+    dr.shown = false;
+  }
+  const drillInline = s => { const h = renderMarkdown(String(s || '')).html; const m = h.match(/^<p>([\s\S]*)<\/p>$/); return m ? m[1] : h; };
+  function vDrill(courseId) {
+    const c = course(courseId);
+    if (!c || !isOwnCourse(c.id) || !c.drill) return `<div class="empty">There is no drill here. <a href="#/learning">Back to learning</a></div>`;
+    const st = S.drills[c.id];
+    if (!st) wantDrill(c);
+    const head = `<div class="page-head"><div><div class="sub"><a href="#/learning/${esc(c.id)}">${esc(c.name)}</a></div><h1>Drill</h1>
+      <div class="sub">Recall the answer first, then show it. A card you remember comes back in 1, 3, 7, 14 and then 30 days; one you miss comes back today. At most ${DRILL_NEW} new cards a day. The schedule is kept in this browser only.</div></div></div>`;
+    if (!st || st.loading) return `${head}<div class="empty">Loading the cards…</div>`;
+    if (st.error) return `${head}<div class="empty">The cards could not be read: ${esc(st.error)}.</div>`;
+    const D = st.data;
+    if (!S.drill || S.drill.cid !== c.id) drillStart(c.id, drillLoad(c.id).deck || 'all', false);
+    const dr = S.drill, s = drillLoad(c.id), day = today(), lessons = drillLessons(D, dr.deck);
+    const pool = D.cards.filter(x => !lessons || lessons.includes(x.lesson));
+    const seen = D.cards.filter(x => s.cards[x.id]).length, learned = D.cards.filter(x => s.cards[x.id] && s.cards[x.id].b >= 3).length;
+    const decks = [['all', `All lessons (${D.cards.length})`], ...D.blocks.map((b, i) => [`b${i}`, `${b.name} — lessons ${(b.lessons || []).join(', ')} (${D.cards.filter(x => (b.lessons || []).includes(x.lesson)).length})`])];
+    const bar = `<div class="drill-bar"><label class="small">Deck <select class="drill-deck" data-course="${esc(c.id)}" aria-label="deck">${decks.map(([v, t]) => `<option value="${esc(v)}"${dr.deck === v ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+      <span class="small muted mono">${dr.free ? 'Whole deck, no schedule · ' : ''}Left: ${dr.queue.length} · Seen: ${seen} · Learned: ${learned} of ${D.cards.length}</span></div>`;
+    const cur = dr.queue.length ? D.byId[dr.queue[0]] : null;
+    let card;
+    if (cur) {
+      const ref = cur.ref && D.course && isOwnCourse(D.course) ? ` · <a href="#/lesson/${esc(D.course)}/${esc(cur.ref)}">open the lesson</a>` : '';
+      card = `<div class="card drill-card" aria-live="polite"><div class="small muted">Lesson ${esc(String(cur.lesson))} · ${esc(cur.title || '')}${ref}</div>
+        <p class="drill-q">${drillInline(cur.q)}</p>
+        ${dr.shown ? `<p class="drill-a">${drillInline(cur.a)}</p>` : ''}
+        <div class="drill-btns">${dr.shown
+          ? `<button class="btn" data-act="drill-no">Didn't remember</button><button class="btn primary" data-act="drill-yes">Remembered</button>`
+          : `<button class="btn primary" data-act="drill-show">Show the answer</button>`}</div>
+        <div class="small muted">Keys: space shows the answer, 1 — didn't remember, 2 — remembered.</div></div>`;
+    } else {
+      const later = pool.map(x => s.cards[x.id] && s.cards[x.id].d).filter(d => d && d > day).sort();
+      const fresh = pool.filter(x => !s.cards[x.id]).length;
+      card = `<div class="card drill-card"><h3>${dr.free ? 'The deck is done.' : 'Done for today.'}</h3>
+        <p class="small">${[later.length ? `The next cards come back on ${esc(later[0])}.` : '', fresh ? `${fresh} new card${fresh === 1 ? '' : 's'} left in this deck; up to ${DRILL_NEW} open a day.` : ''].filter(Boolean).join(' ') || 'Every card of this deck has been seen.'}</p>
+        <div class="drill-btns"><button class="btn" data-act="drill-free">Go through the whole deck without the schedule</button>${dr.free ? '<button class="btn" data-act="drill-again">Back to the schedule</button>' : ''}</div></div>`;
+    }
+    const reset = dr.asking
+      ? `<span class="small">Forget the whole schedule of this course in this browser? <button class="btn sm danger" data-act="drill-reset-yes">Forget it</button> <button class="btn sm" data-act="drill-reset-no">Keep it</button></span>`
+      : `<button class="btn sm ghost" data-act="drill-reset">Reset the schedule</button>`;
+    return `${head}${bar}${card}<div class="drill-foot">${reset}</div>`;
+  }
+  document.addEventListener('keydown', e => {
+    if (S.route.name !== 'drill' || !S.drill || e.ctrlKey || e.metaKey || e.altKey || $('.modal-bg')) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    if ((e.key === ' ' || e.key === 'Enter') && !S.drill.shown && S.drill.queue.length) { e.preventDefault(); S.drill.shown = true; render(); }
+    else if ((e.key === '1' || e.key === '2') && S.drill.shown) { e.preventDefault(); drillAnswer(e.key === '2'); render(); }
+  });
 
   // ---------- the courses published for anyone: courses/index.json and courses/<course>/<file> next
   // to the page (publish_ui.py copies them into the Pages repository; serve.py serves them locally).
@@ -2931,7 +3050,7 @@
     const r = S.route;
     if (LEAD_ONLY.has(r.name) && !canSeeHistory()) return 'dashboard';
     if (!canSeeHistory() && r.name === 'people' && r.tab === 'learning' && r.id === signedInAs()) return 'learning';
-    if (r.name === 'lesson') return 'learning';
+    if (r.name === 'lesson' || r.name === 'drill') return 'learning';
     if (r.name === 'read') return 'courses';
     return r.name;
   }
@@ -2968,7 +3087,7 @@
     const ae = document.activeElement, caret = ae && ae.dataset && ae.dataset.cf === 'q' ? [ae.selectionStart, ae.selectionEnd] : null;
     const views = {
       dashboard: () => vDashboard(), projects: () => r.id ? vProject(r.id) : vProjects(), people: () => r.id ? vPerson(r.id) : vPeople(),
-      learning: () => vLearning(r.id), lesson: () => vLesson(r.id, r.tab), assistant: () => vAssistant(r.id), activity: () => vDashboard(),
+      learning: () => vLearning(r.id), lesson: () => vLesson(r.id, r.tab), drill: () => vDrill(r.id), assistant: () => vAssistant(r.id), activity: () => vDashboard(),
       courses: () => r.id ? vCourse(r.id) : vCourses(), read: () => vRead(r.id, r.tab), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
     };
     // a course reader with no connection is a visitor from outside: the courses alone, no tracker around them
@@ -2997,6 +3116,7 @@
     $$('[data-href]', v).forEach(el => el.addEventListener('click', e => { if (e.target.closest('a,button:not([data-href])')) return; location.hash = el.dataset.href; }));
     $$('[data-filter]', v).forEach(el => el.addEventListener('change', () => { S.filter = { ...(S.filter || {}), [el.dataset.filter]: el.value }; render(); }));
     $$('.lesson-status', v).forEach(el => el.addEventListener('change', async () => { await setLesson(el.dataset.person, el.dataset.lesson, el.value); render(); }));
+    $$('.drill-deck', v).forEach(el => el.addEventListener('change', () => { const s = drillLoad(el.dataset.course); s.deck = el.value; drillKeep(el.dataset.course, s); drillStart(el.dataset.course, el.value, false); render(); }));
     $$('[data-cf]', v).forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => { catFilterOf(el.dataset.project)[el.dataset.cf] = el.value; paintCatalog(el.dataset.project); }));
     $$('[data-goto]', v).forEach(el => el.addEventListener('click', () => { const t = document.getElementById(el.dataset.goto); if (t) t.scrollIntoView({ block: 'start' }); }));
     const af = $('[data-asst-form]', v);
@@ -3053,6 +3173,18 @@
         S.asst.thread = [];
         try { localStorage.removeItem(ASK_KEY); } catch { /* nothing kept */ }
         return render();
+      }
+      case 'drill-show': if (S.drill && S.drill.queue.length) S.drill.shown = true; return render();
+      case 'drill-yes': drillAnswer(true); return render();
+      case 'drill-no': drillAnswer(false); return render();
+      case 'drill-free': if (S.drill) drillStart(S.drill.cid, S.drill.deck, true); return render();
+      case 'drill-again': if (S.drill) drillStart(S.drill.cid, S.drill.deck, false); return render();
+      case 'drill-reset': if (S.drill) S.drill.asking = true; return render();
+      case 'drill-reset-no': if (S.drill) S.drill.asking = false; return render();
+      case 'drill-reset-yes': {
+        if (!S.drill) return;
+        try { localStorage.removeItem(drillKey(S.drill.cid)); } catch { /* nothing kept */ }
+        drillStart(S.drill.cid, S.drill.deck, false); return render();
       }
       case 'enroll-me': {
         if (!canSeeHistory()) return;

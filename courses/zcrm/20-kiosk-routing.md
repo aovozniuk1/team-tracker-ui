@@ -5,6 +5,42 @@
 маршрутизацію: кожна гілка — окремий шлях, і перевіряти треба не лише те, що на гілці сталося, а й
 те, чого на ній статися не повинно.*
 
+## Коротко
+
+*Картка уроку: прочитай її перед уроком і повернись до неї після.*
+
+**Одним реченням.** Складний кіоск — кілька екранів, де Decision обирає гілку за даними, а дії створюють записи й шлють листи.
+
+**Навіщо.** Зібрати дані, розвести за категорією, створити запис і сповістити потрібну людину — одним потоком.
+
+**Де.** **Setup → Customization → Kiosk Studio**; Home page для команди — **Setup → Customization → Customize Home Page** → **+ New Home Page** → **Kiosk**.
+
+**Модель**
+
+- **Decision** — умови на даних; default path ловить усе, що не підійшло.
+- **Create records** — Predefined Configuration (значення наперед) або Via User Input (Quick Create форма).
+- **Wait for completion** — кіоск чекає завершення дії; лише тоді є CreatedRecords і Failure path.
+- **Email Notifications** — лист через Email Template; одержувач — поле запису або користувач CRM.
+
+**Запам'ятай**
+
+1. Гілки не зливаються: у кожної свої дії й екран підтвердження — перевіряй кожну.
+2. Статичне значення picklist у Create records має існувати в полі CRM.
+3. Екран «успіху» — статичний текст; доказ — сам запис у модулі.
+4. Дефект — продукт робить не те, що налаштовано; спостереження — налаштоване розходиться з потребою.
+5. Листи й записи справжні навіть у Test Run; листа не видно — Not verifiable, не Pass.
+
+**Пастки** (симптом → причина)
+
+- Значення з власною гілкою йде в default path → в умові Decision воно набране інакше, ніж у picklist; помилки нема.
+- У **Execute for record** нема CreatedRecords → у дії створення не ввімкнено чи не збережено **Wait for completion**.
+- «A field with this name already exists» → назви полів унікальні в межах усього кіоска.
+
+**Як перевірити**
+
+- Кожне значення категорії проходь окремо: потрібний екран є, чужих нема, адресат листа — свій.
+- Результат дивись у модулі й скриньках адресатів, не на екрані підтвердження.
+
 ---
 
 ## 20.1. Як рішення (Decision) веде потік
@@ -248,10 +284,10 @@ Email Notification не має вбудованих полів Subject/Body — 
 Template** з вибору шаблону — вона відкривається в новому вікні браузера). Створи шаблон із цими
 темою і текстом заздалегідь, потім обери його. У полі одержувача (**To**) варіанти обмежені: «People
 Associated with the Module» → Lead (поля запису, як-от Email, Owner) або «Users» → **Logged in
-User**/конкретний користувач зі списку користувачів організації — вільного вводу адреси й ролей
-User B/User C серед варіантів немає, бо вони не існують як користувачі CRM. Признач одержувачем
-**Logged in User**: у своєму тріалі перевіриш весь потік, а в реальній організації сюди підставляють
-CRM-користувача, що відповідає за напрям.
+User**/конкретний користувач зі списку користувачів організації; вільного вводу адреси немає. Обери
+User B зі списку користувачів. Якщо User B і User C у тріалі ще не додані (урок 1), їх у списку не
+буде — тоді тимчасово признач **Logged in User**, щоб перевірити весь потік, і запиши це як
+відхилення від завдання. У реальній організації тут CRM-користувач, що відповідає за напрям.
 
 **Крок 6. Екран Finance_Screening (екран 2F).** На гілці `Finance_Path` → **+** → **Screen**
 `Finance_Screening`:
@@ -432,7 +468,7 @@ Blocked / Not verifiable), посилання на докази, примітк�
 
 | TC ID | Title | Preconditions | Steps | Expected Result | Actual Result | Status | Evidence |
 |---|---|---|---|---|---|---|---|
-| A20-TS3-01 | Technology category routes to Technology_Screening and creates a Web Download lead | CAND_IntakeRouter on Home page; User B active | 1. Open New Candidate Registration. 2. Fill Basic_Registration: First Name `Tech`, Last Name `Candidate 01`, `tech01@example.com`, `+380501112233`, Job Category `Technology`. 3. Continue. 4. Enter `5`, `Python`, notes `Strong backend`. 5. Submit Registration. 6. Open Leads. | Step 3: Technology_Screening shown (not 2F/2G). Step 5: Confirmation_Tech, Registered Name = `Tech`. Step 6: new lead with entered name, email, phone, Lead Source = Web Download, Description = `Strong backend`; User B got the email | | | TS3-*.png |
+| A20-TS3-01 | Technology category routes to Technology_Screening and creates a Web Download lead | CAND_IntakeRouter on Home page; User B active | 1. Open the CAND IntakeRouter component. 2. Fill Basic_Registration: First Name `Tech`, Last Name `Candidate 01`, `tech01@example.com`, `+380501112233`, Job Category `Technology`. 3. Continue. 4. Enter `5`, `Python`, notes `Strong backend`. 5. Submit Registration. 6. Open Leads. | Step 3: Technology_Screening shown (not 2F/2G). Step 5: Confirmation_Tech, Registered Name = `Tech`. Step 6: new lead with entered name, email, phone, Lead Source = Web Download, Description = `Strong backend`; User B got the email | | | TS3-*.png |
 | A20-TS5-02 | Other category goes to the default path, no email | as above; User B and User C mailboxes open | Same flow with `Gen Candidate 02`, Job Category `Other`, notes empty | General_Intake shown; lead with Lead Source = Web Research, empty Description; no email to User B or User C | | | TS5-*.png |
 
 **Defect Report (Zoho Writer).** На кожен дефект: ID, коротка назва, середовище (тріал, EU, дата),
@@ -458,7 +494,7 @@ Blocked / Not verifiable), посилання на докази, примітк�
 | що показати | де зняти |
 |---|---|
 | обидва налаштовані кіоски в Kiosk Studio | дерева `LC_QuickUpdate` і `CAND_IntakeRouter` у Kiosk Studio |
-| опублікований компонент кіоска на Home page | Home page з компонентом `New Candidate Registration` |
+| опублікований компонент кіоска на Home page | Home page з компонентом кіоска (тайл показує назву `CAND IntakeRouter`) |
 | кастомна кнопка на ліді | картка ліда з кнопкою `Log Call Outcome` |
 | щонайменше одне повне проходження Technology-гілки з усіма трьома екранами | Basic_Registration → Technology_Screening → Confirmation_Tech (краще відео) |
 | щонайменше одне оновлення поля, підтверджене в ліді після тесту простого кіоска | картка ліда до і після TS1 |
@@ -659,21 +695,22 @@ Route_by_Category з трьома гілками. Модуль задавати 
 
 **20.5.** Finance-гілка: `Finance_Screening` з двома обов'язковими Single Line (у `Finance
 Specialisation` — Show tool tip з прикладом) і необов'язковим Multi-line; `Create_Lead_Finance` —
-Lead Source `Cold Call`, Company `Not provided`, Description ← Additional Notes саме з Finance_Screening;
+Lead Source `Cold Call`, Company `Not provided`, Description ← **Finance Additional Notes** саме з Finance_Screening;
 `Notify_UserC_Finance` — **To** User C. Контрольне питання до себе: чи не лишилося в Finance-дії
 чогось від Technology (**To**, поле Additional Notes, Lead Source)?
 
 **20.6.** General-гілка: `General_Intake` з двома необов'язковими полями і кнопкою Submit
-Registration; `Create_Lead_General` з Lead Source `Web Research`, Company `Not provided` і Description ← Additional Notes з
+Registration; `Create_Lead_General` з Lead Source `Web Research`, Company `Not provided` і Description ← **General Additional Notes** з
 General_Intake; дії листа немає. Не `Other`, бо Lead Source у тріалі не має такого значення:
 статичне значення picklist має існувати в полі CRM. `Web Research` — наявне значення, яке до того ж
 відрізняє цю гілку від двох інших.
 
-**20.7.** Три екрани підтвердження з однаковим текстом, полем Registered Name (merge з
-Basic_Registration → First Name, Read Only) і кнопкою Close; Publish; компонент `New Candidate
-Registration` на Home page. Щоб компонент бачили User B і User C, потрібна Customized Home Page,
-відкрита їхнім ролям чи профілям і активна; на особистій User's Home Page його бачиш лише ти. Якщо
-на твоєму шляху додавання немає поля для назви компонента — запиши відхилення. Перевірка: Home page
+**20.7.** Три екрани підтвердження з однаковим текстом, полями `Registered Name` / `Registered Name
+Finance` / `Registered Name General` (назви унікальні в межах кіоска; merge з Basic_Registration →
+First Name, Read Only) і кнопкою Close; Publish; компонент кіоска на Home page — тайл показує назву
+`CAND IntakeRouter`, окремого поля для назви компонента немає. Щоб компонент бачили User B і User C,
+потрібна Customized Home Page, відкрита їхнім ролям чи профілям і активна; на особистій User's Home
+Page його бачиш лише ти. Перевірка: Home page
 показує компонент із першим екраном кіоска.
 
 **20.8.** TS1: Pass, якщо Lead Name = ім'я ліда, після Save & Close видно Confirmation, а картка ліда
@@ -719,7 +756,7 @@ Primary Technical Skill у лід не потрапили (див. 20.12).
 | A20-K2-06 | Duplicate email | Lead `tech01@example.com` exists | Register again with the same email | Record whether a second lead is created; raise duplicate risk |
 | A20-K2-07 | Cyrillic name | — | First Name `Олена`, Technology path | Lead and Registered Name show `Олена` correctly |
 | A20-K2-08 | User B can open the lead from the email | TS3 done | Log in as User B, find the new lead | Lead visible to User B; if not — observation about owner and visibility |
-| A20-K2-09 | Component visible to User C | Customized Home Page shared to User C's profile | Log in as User C, open Home | New Candidate Registration visible |
+| A20-K2-09 | Component visible to User C | Customized Home Page shared to User C's profile | Log in as User C, open Home | CAND IntakeRouter component visible |
 | A20-K2-10 | Simple kiosk still works | Both kiosks published | Run TS1 again | Same result as TS1 |
 
 **20.12.** Перевірити можна: First Name, Last Name, Email, Phone з першого екрана, Lead Source = `Web
@@ -736,7 +773,7 @@ Description). Це не дефект продукту — система роб�
    - **Impact:** фінансові кандидати маркуються як технологічні: звіти за джерелами хибні, рекрутер
       фінансового напряму (User C) про нових кандидатів не дізнається.
    - **Preconditions:** kiosk published; User B and User C active; mailboxes accessible.
-   - **Steps:** 1. Open New Candidate Registration. 2. Fill Screen 1 with `Fin Candidate 01`,
+   - **Steps:** 1. Open the CAND IntakeRouter component. 2. Fill Screen 1 with `Fin Candidate 01`,
       `fin01@example.com`, Job Category `Finance`. 3. Continue. 4. Fill Finance_Screening. 5. Submit
       Registration. 6. Open the new lead; check both mailboxes.
    - **Expected:** Finance_Screening after Continue; Lead Source `Cold Call`; email to User C only.
@@ -764,7 +801,7 @@ Report` (Writer, якщо були розбіжності; спостереже�
 - [ ] знаєш, що екран «успіху» нічого не доводить, і де шукати доказ;
 - [ ] розрізняєш User's Home Page і Customized Home Page і знаєш, як дати кіоск User B і User C;
 - [ ] без підглядання збираєш `CAND_IntakeRouter`: екрани, рішення, дії, три підтвердження, Publish;
-- [ ] ставиш кіоск на Home page компонентом `New Candidate Registration`;
+- [ ] ставиш кіоск на Home page компонентом (тайл показує назву кіоска `CAND IntakeRouter`);
 - [ ] проходиш п'ять сценаріїв A20 і перевіряєш листи чесно, зі статусом Not verifiable, коли треба;
 - [ ] відрізняєш дефект від спостереження і знаходиш у конфігурації зібрані, але не збережені поля;
 - [ ] пишеш Defect Report з впливом простими словами і гіпотезою причини;

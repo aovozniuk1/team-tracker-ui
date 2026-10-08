@@ -363,6 +363,14 @@ table.matrix thead tr.lessons th a { color: inherit; }
 .lesson-mark select { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
 .lesson-nav { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0 14px; flex-wrap: wrap; }
 .lesson-toc { margin-bottom: 14px; }
+.drill-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 4px 0 12px; }
+.drill-bar select { margin-left: 6px; max-width: 100%; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.drill-card { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+.drill-q { margin: 0; font-size: 1.12rem; font-weight: 600; line-height: 1.45; }
+.drill-a { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); line-height: 1.5; }
+.drill-q code, .drill-a code { font-family: var(--mono); font-size: .88em; }
+.drill-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.drill-foot { margin-top: 12px; }
 .lesson-toc summary { cursor: pointer; font-weight: 600; }
 .lesson-toc ul { margin: 8px 0 0; }
 .lesson-body { max-width: 860px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 26px 26px; line-height: 1.6; overflow-wrap: anywhere; }
