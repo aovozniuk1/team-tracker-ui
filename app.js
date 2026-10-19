@@ -1676,17 +1676,18 @@
 
   // Starting a run goes through the tracker's own "Run tests" workflow, which holds the
   // project credentials server-side; this browser only ever talks to the tracker repository.
-  async function runCI(projectId, groupId) {
-    const s = ciSource(projectId), g = (s && (s.groups || []).find(x => x.id === groupId)) || null;
+  async function runCI(projectId, groupId, given) {
+    const s = ciSource(projectId), g = given || (s && (s.groups || []).find(x => x.id === groupId)) || null;
     if (!g) return;
     if (!mayRun(s, g)) { toast(`Only ${(s.allowedActors || []).join(', ') || 'the lead'} can start this one.`); return; }
     if (S.backend !== 'github') { toast('Connect this page to GitHub first (Data → Connect to GitHub)'); return; }
-    if (!confirm(`Start “${g.title}” on ${s.repoName}?\n\nThis runs the real suite against that environment.`)) return;
+    const pick = g.dispatchInputs ? `: suite ${g.dispatchInputs.suite} on ${g.dispatchInputs.environment}` : '';
+    if (!confirm(`Start “${g.title}”${pick} on ${s.repoName}?\n\nThis runs the real suite against that environment.`)) return;
     const cfg = ghConfig();
     try {
       const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/actions/workflows/run-tests.yml/dispatches`, {
         method: 'POST', headers: { ...ghHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ref: cfg.branch, inputs: { project: projectId, target: g.dispatchTarget || g.workflowFile } }),
+        body: JSON.stringify({ ref: cfg.branch, inputs: { project: projectId, target: g.dispatchTarget || g.workflowFile, ...(g.dispatchInputs || {}) } }),
       });
       if (r.status === 204) {
         const w = addWait(s, g);
@@ -1698,6 +1699,15 @@
       if (r.status === 403 || r.status === 404) { toast(`Cannot start it from here (${err}). Add “Actions: read and write” to this token, or open it on GitHub.`); return; }
       toast('Could not start the run: ' + err);
     } catch { toast('Could not reach GitHub'); }
+  }
+
+  // A suite runs into a group of its own, "suite:<key> on <env>", which exists once it has run.
+  function runSuite(projectId, button) {
+    const s = ciSource(projectId), box = button.closest('.suite-run');
+    if (!s || !box) return;
+    const key = $('[data-suite-pick]', box).value, env = $('[data-suite-env]', box).value;
+    const id = `suite:${key} on ${env}`, base = (s.groups || []).find(x => x.dispatchTarget === s.suiteTarget) || {};
+    return runCI(projectId, id, groupOf(s, id) || { ...base, id, env: `${key} on ${env}`, dispatchInputs: { suite: key, environment: env } });
   }
 
   async function editSettings() {
@@ -1901,6 +1911,18 @@
     return `<div class="card" style="margin-bottom:14px"><h3>Reports</h3><div class="tbl-wrap"><table class="tbl rp-tbl"><tbody>${rows.join('')}</tbody></table></div>${s.reportsError ? `<div class="small" style="color:var(--yellow-text);margin-top:8px">Some reports could not be stored for viewing here: ${esc(s.reportsError)}</div>` : ''}</div>`;
   }
 
+  // The suite workflow is started from its picker, which names a suite and an environment.
+  const isSuiteBase = (s, g) => !!s.suiteTarget && g.dispatchTarget === s.suiteTarget && !g.dispatchInputs;
+  function suitePicker(p, s) {
+    const base = (s.groups || []).find(g => isSuiteBase(s, g));
+    if (!base || !(s.suites || []).length) return '';
+    const run = mayRun(s, base)
+      ? `<button class="btn sm primary" data-act="run-suite" data-project="${esc(p.id)}" title="Start the suite on the environment picked">▶ Run suite</button>`
+      : `<button class="btn sm" disabled title="Only ${esc((s.allowedActors || []).join(', ') || 'the lead')} can start a suite">🔒 Run suite</button>`;
+    return `<div class="suite-run"><select data-suite-pick aria-label="Suite">${s.suites.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('')}</select>
+      <select data-suite-env aria-label="Environment"><option value="stage">stage</option><option value="prod">prod</option></select>${run}</div>`;
+  }
+
   function vProjectCI(p) {
     const s = ciSource(p.id);
     if (!s) return `<div class="card"><div class="empty">No CI source is configured for this project. Add it to <span class="mono">ci-sources.json</span> in the tracker repository and run the collector.</div></div>`;
@@ -1949,11 +1971,11 @@
           <td class="small nowrap">${last ? esc(fmtDur(last.durationSec)) : ''}</td>
           <td class="small nowrap">${history || '<span class="muted">—</span>'}</td>
           <td class="small">${groupAllure}</td>
-          <td class="nowrap">${mayRun(s, g)
+          <td class="nowrap">${g.runnable === false || isSuiteBase(s, g) ? '' : mayRun(s, g)
             ? `<button class="btn sm primary" data-act="run-ci" data-project="${esc(p.id)}" data-group="${esc(g.id)}" title="Start this run now">▶ Run</button>`
             : `<button class="btn sm" disabled title="Only ${esc((s.allowedActors || []).join(', ') || 'the lead')} can start this one${s.restrictedNote ? ' — ' + esc(s.restrictedNote) : ''}">🔒 Run</button>`}${g.workflowUrl ? ' ' + link(g.workflowUrl, 'on ' + (s.kind === 'github' ? 'GitHub' : 'Bitbucket')) : ''}</td></tr>`;
       }).join('');
-      return `<div class="section"><div class="section-head"><h3>${esc(KIND_TITLE[kind] || label(kind))}</h3></div>
+      return `<div class="section"><div class="section-head"><h3>${esc(KIND_TITLE[kind] || label(kind))}</h3>${kind === 'suite' ? suitePicker(p, s) : ''}</div>
         <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Environment</th><th>Last run (UTC)</th><th>Result</th><th>Tests</th><th>Duration</th><th>Runs before it</th><th>Report</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }).join('');
 
@@ -3227,6 +3249,7 @@
       case 'del-msg': return deleteMessage(d.id);
       case 'who': return chooseViewer();
       case 'run-ci': return runCI(d.project, d.group);
+      case 'run-suite': return runSuite(d.project, b);
       case 'report': return openReportFor(d.project, d.run || '', d.idx);
       case 'report-dl': return downloadReportFor(d.project, d.run || '', d.idx);
       case 'wait-dismiss': return dismissWait(d.id);
