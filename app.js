@@ -1931,7 +1931,8 @@
       if (envs.length) {
         for (const env of envs) {
           lanes.push({ env, title: kind, reportOf: rep => reportEnv(rep).endsWith('/' + env),
-            runs: gr.filter(r => env in (r.envResults || {})).map(r => ({ ...r, result: r.envResults[env] })) });
+            runs: gr.filter(r => env in (r.envResults || {})).map(r => ({ ...r, result: r.envResults[env],
+              counts: ((r.reports || []).find(rep => reportEnv(rep).endsWith('/' + env)) || {}).counts || null })) });
         }
         continue;
       }
