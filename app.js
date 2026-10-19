@@ -837,7 +837,7 @@
     const rep = runId && !r ? null : ((r ? r.reports : s.reports) || [])[Number(idx)];
     if (!rep) { toast('That report is no longer in the snapshot'); return; }
     const caption = r
-      ? [project(pid)?.name, groupName(groupOf(s, r.group)) || r.name, `${fmtWhen(r.startedAt)} UTC`, label(runResult(r).replace(/_/g, ' '))]
+      ? [project(pid)?.name, groupName(groupOf(s, r.group)) || r.name, r.number ? `run #${r.number}` : '', `started ${fmtWhen(r.startedAt)} UTC`, label(runResult(r).replace(/_/g, ' '))]
       : [project(pid)?.name, s.repoName];
     openReport(rep, caption.filter(Boolean).join(' · '));
   }
@@ -1839,7 +1839,7 @@
     const strays = stray.length ? `<div class="card" style="margin-bottom:14px"><h3>Suggestions for fields the weekly review does not write</h3>${stray.map(k => suggestBox(p, k)).join('')}</div>` : '';
     const listCard = (key, title, empty, last) => `<div class="card"${last ? '' : ' style="margin-bottom:14px"'}><h3>${esc(title)}${editedNote(p, key)}</h3>${listOr(p[key], empty)}${suggestBox(p, key)}</div>`;
     const why = canSeeHistory() && src && src.reportsNote ? `<div class="hint" style="margin:-6px 0 14px">No report came from Bitbucket for run ${esc(src.reportsNote)}</div>` : '';
-    if (tab === 'ci') return head + tabs + (src ? latestReports(p, src) : '') + why + waitsBox(id) + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
+    if (tab === 'ci') return head + tabs + (src ? reportsPanel(p, src) : '') + why + waitsBox(id) + liveBlock(src || { runs: [] }, false) + vProjectCI(p);
     if (tab === 'tests') return head + tabs + vProjectTests(p);
     return head + tabs + `${p.nextMilestone?.text ? `<div class="banner"><b>Next milestone:</b> ${esc(p.nextMilestone.text)}${p.nextMilestone.due ? ` — due ${esc(p.nextMilestone.due)} (${esc(ago(p.nextMilestone.due))})` : ''}</div>` : ''}${health}${strays}
       <div class="grid cols-2">
@@ -1865,21 +1865,40 @@
   const mayRun = (s, g) => !g.restricted || S.backend === 'server' || (s.allowedActors || []).some(a => a.toLowerCase() === actorLogin());
   const runsOfGroup = (s, gid) => runsOf(s).filter(r => r.group === gid);
 
-  // One click per environment to the newest finished run's report; an older run stands in only
-  // when the newest has none the page can show, and its date says so.
-  function latestReports(p, s) {
-    const items = (s.groups || []).map(g => {
-      const done = runsOfGroup(s, g.id).filter(isFinished);
-      const r = newestInline(s, g.id) || done.find(x => (x.reports || []).length);
-      if (!r) return '';
-      const i = firstInline(r), older = done[0] && done[0] !== r;
-      const inner = `<span class="rc-name">${esc(groupName(g))}</span>${resultPill(r)}<span class="muted${older ? ' rc-older' : ''}" title="${older ? 'a newer run has no report that opens here' : ''}">${esc(fmtWhen(r.startedAt))}${older ? ' · older run' : ''}</span>`;
-      return i >= 0
-        ? reportBtn(p.id, String(r.id), r.reports[i], i, `${inner}<span class="rc-go">Report</span>`, 'rchip')
-        : `<a class="rchip" href="${esc(r.reports[0].url)}" target="_blank" rel="noopener" title="${esc(r.reports[0].name || 'Report')}, opens in a new tab">${inner}<span class="rc-go">${esc(r.reports[0].name || 'Report')} ↗</span></a>`;
+  // One row per job: the run that was going at the last check, then the newest finished runs that
+  // left a report, each named by its own run, so the report of an earlier run is never taken for
+  // the one still underway.
+  const REPORT_RUNS = 3;
+  const runLabel = r => r.number ? `#${r.number}` : `of ${fmtWhen(r.startedAt)}`;
+  const finishedAt = r => r.finishedAt || (r.startedAt && r.durationSec != null
+    ? new Date(isoMs(r.startedAt) + r.durationSec * 1000).toISOString() : '');
+  const reportEnv = rep => ((rep.name || '').match(/\(([^)]+)\)/) || [])[1] || '';
+  // A job that covers several environments ("on deploy") says which one each report is from.
+  function runReports(pid, g, r, cls) {
+    const named = !/^(prod|stage)$/.test(g.env || '');
+    return (r.reports || []).map((rep, i) => {
+      const text = `Report ${runLabel(r)}${named && reportEnv(rep) ? ' · ' + reportEnv(rep) : ''}`;
+      return hasInline(rep)
+        ? `<span class="rep">${reportBtn(pid, String(r.id), rep, i, esc(text), cls)}${dlBtn(pid, String(r.id), rep, i)}${extLink(rep)}</span>`
+        : link(rep.url, text);
+    }).join(' ');
+  }
+  function reportsPanel(p, s) {
+    const rows = (s.groups || []).map(g => {
+      const gr = runsOfGroup(s, g.id);
+      const live = gr.filter(isLive);
+      const done = gr.filter(r => isFinished(r) && (r.reports || []).length)
+        .sort((a, b) => finishedAt(b).localeCompare(finishedAt(a))).slice(0, REPORT_RUNS);
+      if (!live.length && !done.length) return '';
+      const [newest, ...earlier] = done;
+      const now = live.map(r => `<div class="rp-run"><span class="live-dot"></span> <b>Run ${esc(runLabel(r))}</b> <span class="small">was running at the last check, since ${esc(fmtWhen(r.startedAt))} UTC${r.trigger ? ' · ' + esc(r.trigger) : ''} — its report comes when it finishes${r.url ? ' · ' + link(r.url, 'watch') : ''}</span></div>`).join('');
+      const last = newest ? `<div class="rp-run">${runReports(p.id, g, newest)} ${resultPill(newest)} <span class="small">finished ${esc(fmtWhen(finishedAt(newest)))} UTC${newest.trigger ? ' · ' + esc(newest.trigger) : ''}${newest.counts ? ' · ' + esc(countsText(newest.counts)) : ''}${newest.sha ? ` · <span class="mono">${esc(newest.sha)}</span>` : ''}</span></div>`
+        : '<span class="muted small">no finished run has left a report yet</span>';
+      const before = earlier.length ? `<div class="rp-run small"><span class="muted">Earlier:</span> ${earlier.map(r => `<span class="rp-item">${runReports(p.id, g, r, 'btn sm')} ${resultPill(r)} <span class="muted">${esc(fmtWhen(finishedAt(r)))}</span></span>`).join('')}</div>` : '';
+      return `<tr><td class="nowrap"><b>${esc(groupName(g))}</b></td><td>${now}${last}${before}</td></tr>`;
     }).filter(Boolean);
-    if (!items.length) return '';
-    return `<div class="card latest-reports" style="margin-bottom:14px"><h3>Latest reports</h3><div class="rstrip">${items.join('')}</div>${s.reportsError ? `<div class="small" style="color:var(--yellow-text);margin-top:8px">Some reports could not be stored for viewing here: ${esc(s.reportsError)}</div>` : ''}</div>`;
+    if (!rows.length) return '';
+    return `<div class="card" style="margin-bottom:14px"><h3>Reports</h3><div class="tbl-wrap"><table class="tbl rp-tbl"><tbody>${rows.join('')}</tbody></table></div>${s.reportsError ? `<div class="small" style="color:var(--yellow-text);margin-top:8px">Some reports could not be stored for viewing here: ${esc(s.reportsError)}</div>` : ''}</div>`;
   }
 
   function vProjectCI(p) {
@@ -1906,7 +1925,7 @@
       <td><b>${esc(r.name || '')}</b>${r.title && r.title !== r.name ? `<div class="muted small">${esc(trunc(r.title, 90))}</div>` : ''}${r.number ? `<div class="muted small">#${esc(String(r.number))}</div>` : ''}</td>
       <td class="small">${esc(r.trigger || '')}${r.branch ? `<div class="muted">${esc(r.branch)}</div>` : ''}</td><td>${resultPill(r)}</td>
       <td class="small">${r.counts ? esc(countsText(r.counts)) : '<span class="muted">—</span>'}</td><td class="small nowrap">${esc(fmtDur(r.durationSec))}</td>
-      <td class="small nowrap">${reportLinks(p.id, String(r.id), r.reports, 'Report')}${(r.reports || []).length && r.url ? ' · ' : ''}${r.url ? link(r.url, 'run') : ''}</td></tr>`;
+      <td class="small nowrap">${reportLinks(p.id, String(r.id), r.reports, `Report ${runLabel(r)}`)}${(r.reports || []).length && r.url ? ' · ' : ''}${r.url ? link(r.url, 'run') : ''}</td></tr>`;
 
     // one block per kind (regression / load / suite / deploy), one row per environment
     const kinds = [...new Set(groups.map(g => g.kind))];
@@ -1915,8 +1934,8 @@
         const gr = runsOfGroup(s, g.id), last = gr[0];
         const withRep = last && (last.reports || []).length ? last : gr.find(r => (r.reports || []).length);
         const groupAllure = !withRep ? '<span class="muted">—</span>'
-          : withRep === last ? reportLinks(p.id, String(last.id), last.reports, 'Report')
-          : `<div class="muted small">last with a report, ${esc(fmtWhen(withRep.startedAt))}:</div>${reportLinks(p.id, String(withRep.id), withRep.reports, 'Report')}`;
+          : withRep === last ? reportLinks(p.id, String(last.id), last.reports, `Report ${runLabel(last)}`)
+          : `<div class="muted small">last with a report, ${esc(fmtWhen(withRep.startedAt))}:</div>${reportLinks(p.id, String(withRep.id), withRep.reports, `Report ${runLabel(withRep)}`)}`;
         const history = gr.slice(1, 6).map(r => {
           const res = runResult(r), mark = /success/.test(res) ? '●' : /fail|error|timed/.test(res) ? '✕' : '·';
           const cls = /success/.test(res) ? 'var(--green-text)' : /fail|error|timed/.test(res) ? 'var(--red-text)' : 'var(--muted)';

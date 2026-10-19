@@ -291,17 +291,10 @@ svg.key { flex: 0 0 auto; overflow: visible; }
 .rep-dl { background: none; border: 0; cursor: pointer; font: inherit; line-height: inherit; }
 .rep-list { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .ci-cell { margin: 2px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.rstrip { display: flex; flex-wrap: wrap; gap: 8px; }
-.rchip {
-  display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; max-width: 100%;
-  padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface);
-  color: var(--text); font: inherit; font-size: .86rem; text-align: left; cursor: pointer;
-}
-.rchip:hover { border-color: var(--accent); background: var(--accent-soft); text-decoration: none; }
-.rchip:focus-visible, .rep-ext:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.rchip .rc-name { font-weight: 600; }
-.rchip .rc-go { color: var(--accent); font-weight: 600; }
-.rchip .rc-older { font-style: italic; }
+.rep-ext:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rp-tbl td { vertical-align: top; }
+.rp-run { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 3px 0; }
+.rp-item { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-right: 10px; max-width: 100%; }
 .card.wait { border-color: var(--accent); margin-bottom: 14px; }
 .card.wait.ready { border-color: var(--green); box-shadow: 0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent), var(--shadow); }
 .card.wait.lost { border-color: var(--border); }
@@ -429,7 +422,8 @@ table.matrix thead tr.lessons th a { color: inherit; }
   .report-viewer header { padding: 8px 12px; }
   .wait-row { flex-direction: column; gap: 8px; }
   .wait-row .ops { justify-content: flex-start; }
-  .rchip { width: 100%; }
+  .rp-tbl tr, .rp-tbl td { display: block; }
+  .rp-tbl td:first-child { padding-bottom: 0; border-bottom: 0; }
   .fab { display: flex; position: fixed; right: 16px; bottom: calc(66px + env(safe-area-inset-bottom)); width: 50px; height: 50px; border-radius: 50%; background: var(--accent-fill); color: #fff; border: 0; font-size: 26px; align-items: center; justify-content: center; box-shadow: var(--shadow); z-index: 41; cursor: pointer; }
 }
 @media (max-width: 420px) {
