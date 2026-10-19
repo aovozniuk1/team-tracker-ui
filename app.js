@@ -283,7 +283,7 @@
 
   // ---------- test catalogues: data/catalog/<projectId>.json, shared and read-only here
   // A project without a file has no Tests tab; nothing about that is an error.
-  S.catalogs = Object.create(null); S.catPending = new Set(); S.catFilter = Object.create(null);
+  S.catalogs = Object.create(null); S.catPending = new Set(); S.catFilter = Object.create(null); S.ciHist = Object.create(null);
   const CATALOG_ID = /^[a-z0-9-]+$/;
   let catIndex = null;
   // The server and GitHub both list the folder in one request, so projects without a catalogue are
@@ -482,7 +482,7 @@
   const runsOf = s => ((s && s.runs) || []).slice().sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
   const lastRun = s => runsOf(s)[0];
   // "Tests on deploy" fires many times a day; the headline of a project is its regression.
-  const headlineRun = s => { const rs = runsOf(s); return rs.find(r => r.kind === 'regression') || rs[0]; };
+  const headlineRun = s => { const rs = runsOf(s).filter(r => !r.tick); return rs.find(r => r.kind === 'regression' && /^prod/i.test(r.env || '')) || rs.find(r => r.kind === 'regression') || rs[0]; };
   const failingGroups = s => (s && s.groups || []).filter(g => { const r = runsOf(s).find(x => x.group === g.id); return r && /fail|error|timed/.test(runResult(r)); });
   const runResult = r => (r.result || (r.status === 'completed' ? 'unknown' : r.status) || 'unknown').toLowerCase();
   const resultPill = r => { const res = runResult(r); const cls = /success/.test(res) ? 'green' : /fail|error|timed/.test(res) ? 'red' : /progress|queued|pending|running/.test(res) ? 'yellow' : 'grey'; return pill(cls, label(res.replace(/_/g, ' '))); };
@@ -490,7 +490,12 @@
   const kindName = k => KIND[k] || label(k);
   const fmtDur = s => s == null || isNaN(s) ? '' : s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
   const fmtWhen = iso => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
-  const agoIso = iso => iso ? ago(String(iso).slice(0, 10)) : 'never';
+  const agoIso = iso => {
+    if (!iso) return 'never';
+    const ms = Date.now() - Date.parse(String(iso).replace(/(\.\d{3})\d+/, '$1'));
+    if (!/T/.test(String(iso)) || !(ms >= 0) || ms >= 864e5) return ago(String(iso).slice(0, 10));
+    return ms < 36e5 ? `${Math.max(1, Math.round(ms / 6e4))} min ago` : `${Math.round(ms / 36e5)} h ago`;
+  };
   const countsText = c => c ? `${c.passed ?? '?'} passed${c.failed ? `, ${c.failed} failed` : ''}${c.broken ? `, ${c.broken} broken` : ''}${c.skipped ? `, ${c.skipped} skipped` : ''} of ${c.total ?? '?'}` : '';
   const ciAge = () => { const t = ci().collectedAt; if (!t) return null; const h = (Date.now() - new Date(t).getTime()) / 36e5; return { hours: h, stale: h > 3 }; };
   const isLive = r => /queued|in_progress|pending|waiting|requested|running|building/i.test(r.status || '');
@@ -683,7 +688,7 @@
   function nextCollectAt(w, now) {
     const MIN = 60000, EXTRA = 2, LIMIT = 180 * MIN;
     const at = Date.parse(w && w.at), made = (w && w.made) || 0;
-    if (!w || w.finished || !(at > 0)) return null;
+    if (!w || w.finished || w.startState === 'refused' || !(at > 0)) return null;
     const plan = Array.isArray(w.plan) && w.plan.length ? w.plan : [w.firstMin > 0 ? w.firstMin : 10];
     const last = plan[plan.length - 1], every = Math.max(5, Math.round(last / 10)) * MIN;
     if (made >= plan.length + EXTRA) return null;
@@ -752,9 +757,35 @@
     // at least once a minute, so the countdown on the cards stays true
     waitTimer = setTimeout(tickWaits, Math.min(60000, Math.max(S.collecting ? 15000 : 1000, wait)));
   }
+  // The start itself can be refused - a target the tracker does not run, a suite it does not
+  // know, someone not allowed - and then no run ever comes. The card reads that from the
+  // tracker's own run instead of waiting for one.
+  async function checkStarts(now = Date.now()) {
+    const open = S.waits.filter(w => w.startTitle && !w.startState && now - (w.startCheckedAt || 0) > 20000);
+    if (!open.length || S.backend !== 'github') return false;
+    const cfg = ghConfig();
+    let runs = [];
+    try {
+      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/actions/workflows/run-tests.yml/runs?per_page=20&event=workflow_dispatch`, { headers: ghHeaders(), cache: 'no-store' });
+      if (!r.ok) return false;
+      runs = (await r.json()).workflow_runs || [];
+    } catch { return false; }
+    let changed = false;
+    for (const w of open) {
+      w.startCheckedAt = now;
+      const mine = runs.find(x => x.display_title === w.startTitle && Date.parse(x.created_at) >= Date.parse(w.at) - 60000);
+      if (!mine || mine.status !== 'completed') continue;
+      w.startState = mine.conclusion === 'success' ? 'started' : 'refused';
+      w.startUrl = mine.html_url; changed = true;
+      if (w.startState === 'refused') toast(`${waitTitle(w)} was not started — the card says why`, 6000);
+    }
+    if (changed) writeWaits();
+    return changed;
+  }
   async function tickWaits() {
     waitTimer = null;
     const now = Date.now();
+    if (await checkStarts(now)) paintWaits();
     const due = S.waits.filter(w => { const t = nextCollectAt(w, now); return t != null && t <= now; });
     if (due.length && !S.collecting) {
       const dueAt = Math.min(...due.map(w => nextCollectAt(w, now)));
@@ -789,7 +820,11 @@
     const asked = utcTime(Date.parse(w.at));
     const x = `<button class="btn sm ghost" data-act="wait-dismiss" data-id="${esc(w.id)}" title="Stop following this run" aria-label="Stop following this run">✕</button>`;
     let cls = 'card wait', head, body, ops = '', live = false;
-    if (run && isFinished(run)) {
+    if (w.startState === 'refused') {
+      cls += ' lost';
+      head = 'Not started — the tracker refused it';
+      body = `Requested ${esc(asked)}. ${w.startUrl ? link(w.startUrl, 'See why') : ''}`;
+    } else if (run && isFinished(run)) {
       const i = firstInline(run);
       head = i >= 0 ? 'Report ready' : `Finished — ${label(runResult(run).replace(/_/g, ' '))}`;
       if (i >= 0) { cls += ' ready'; ops = reportBtn(w.projectId, String(run.id), run.reports[i], i, 'Open report', 'btn primary'); }
@@ -1691,6 +1726,8 @@
       });
       if (r.status === 204) {
         const w = addWait(s, g);
+        w.startTitle = `Start ${g.dispatchTarget || g.workflowFile}${g.dispatchInputs ? ` (${g.dispatchInputs.suite} on ${g.dispatchInputs.environment})` : ''} on ${projectId}`;
+        writeWaits();
         toast('Run requested. The card on the CI tab follows it until its report is in.'); render();
         const card = $(`[data-wait="${w.id}"]`); if (card) card.scrollIntoView({ block: 'nearest' });
         return;
@@ -1875,40 +1912,56 @@
   const mayRun = (s, g) => !g.restricted || S.backend === 'server' || (s.allowedActors || []).some(a => a.toLowerCase() === actorLogin());
   const runsOfGroup = (s, gid) => runsOf(s).filter(r => r.group === gid);
 
-  // One row per job: the run that was going at the last check, then the newest finished runs that
-  // left a report, each named by its own run, so the report of an earlier run is never taken for
-  // the one still underway.
+  // Grouped by the environment a run went to: per job, the run that was going at the last check,
+  // then the newest finished runs that left a report, each named by its own run. A job serving
+  // several environments, the after-deploy suite, is read per environment; the watcher's idle
+  // ticks are left out.
   const REPORT_RUNS = 3;
+  const CI_ENV_ORDER = ['prod', 'stage'];
+  const envRank = e => { const i = CI_ENV_ORDER.indexOf(e); return i < 0 ? CI_ENV_ORDER.length : i; };
   const runLabel = r => r.number ? `#${r.number}` : `of ${fmtWhen(r.startedAt)}`;
   const finishedAt = r => r.finishedAt || (r.startedAt && r.durationSec != null
     ? new Date(isoMs(r.startedAt) + r.durationSec * 1000).toISOString() : '');
   const reportEnv = rep => ((rep.name || '').match(/\(([^)]+)\)/) || [])[1] || '';
-  // A job that covers several environments ("on deploy") says which one each report is from.
-  function runReports(pid, g, r, cls) {
-    const named = !/^(prod|stage)$/.test(g.env || '');
-    return (r.reports || []).map((rep, i) => {
-      const text = `Report ${runLabel(r)}${named && reportEnv(rep) ? ' · ' + reportEnv(rep) : ''}`;
-      return hasInline(rep)
-        ? `<span class="rep">${reportBtn(pid, String(r.id), rep, i, esc(text), cls)}${dlBtn(pid, String(r.id), rep, i)}${extLink(rep)}</span>`
-        : link(rep.url, text);
-    }).join(' ');
+  function lanesOf(s) {
+    const lanes = [];
+    for (const g of s.groups || []) {
+      const gr = runsOfGroup(s, g.id).filter(r => !r.tick), kind = KIND_TITLE[g.kind] || label(g.kind);
+      const envs = [...new Set(gr.flatMap(r => Object.keys(r.envResults || {})))];
+      if (envs.length) {
+        for (const env of envs) {
+          lanes.push({ env, title: kind, reportOf: rep => reportEnv(rep).endsWith('/' + env),
+            runs: gr.filter(r => env in (r.envResults || {})).map(r => ({ ...r, result: r.envResults[env] })) });
+        }
+        continue;
+      }
+      const pick = g.dispatchInputs;
+      lanes.push({ env: pick ? pick.environment : g.env, title: pick ? `${kind} · ${pick.suite}` : kind, reportOf: () => true, runs: gr });
+    }
+    return lanes;
+  }
+  function runReports(pid, lane, r, cls) {
+    return (r.reports || []).map((rep, i) => !lane.reportOf(rep) ? '' : hasInline(rep)
+      ? `<span class="rep">${reportBtn(pid, String(r.id), rep, i, esc(`Report ${runLabel(r)}`), cls)}${dlBtn(pid, String(r.id), rep, i)}${extLink(rep)}</span>`
+      : link(rep.url, `Report ${runLabel(r)}`)).filter(Boolean).join(' ');
   }
   function reportsPanel(p, s) {
-    const rows = (s.groups || []).map(g => {
-      const gr = runsOfGroup(s, g.id);
-      const live = gr.filter(isLive);
-      const done = gr.filter(r => isFinished(r) && (r.reports || []).length)
+    const rows = lanesOf(s).map(lane => {
+      const live = lane.runs.filter(isLive);
+      const done = lane.runs.filter(r => isFinished(r) && (r.reports || []).some(lane.reportOf))
         .sort((a, b) => finishedAt(b).localeCompare(finishedAt(a))).slice(0, REPORT_RUNS);
-      if (!live.length && !done.length) return '';
+      if (!live.length && !done.length) return null;
       const [newest, ...earlier] = done;
       const now = live.map(r => `<div class="rp-run"><span class="live-dot"></span> <b>Run ${esc(runLabel(r))}</b> <span class="small">was running at the last check, since ${esc(fmtWhen(r.startedAt))} UTC${r.trigger ? ' · ' + esc(r.trigger) : ''} — its report comes when it finishes${r.url ? ' · ' + link(r.url, 'watch') : ''}</span></div>`).join('');
-      const last = newest ? `<div class="rp-run">${runReports(p.id, g, newest)} ${resultPill(newest)} <span class="small">finished ${esc(fmtWhen(finishedAt(newest)))} UTC${newest.trigger ? ' · ' + esc(newest.trigger) : ''}${newest.counts ? ' · ' + esc(countsText(newest.counts)) : ''}${newest.sha ? ` · <span class="mono">${esc(newest.sha)}</span>` : ''}</span></div>`
+      const last = newest ? `<div class="rp-run">${runReports(p.id, lane, newest)} ${resultPill(newest)} <span class="small">finished ${esc(fmtWhen(finishedAt(newest)))} UTC${newest.trigger ? ' · ' + esc(newest.trigger) : ''}${newest.counts ? ' · ' + esc(countsText(newest.counts)) : ''}${newest.sha ? ` · <span class="mono">${esc(newest.sha)}</span>` : ''}</span></div>`
         : '<span class="muted small">no finished run has left a report yet</span>';
-      const before = earlier.length ? `<div class="rp-run small"><span class="muted">Earlier:</span> ${earlier.map(r => `<span class="rp-item">${runReports(p.id, g, r, 'btn sm')} ${resultPill(r)} <span class="muted">${esc(fmtWhen(finishedAt(r)))}</span></span>`).join('')}</div>` : '';
-      return `<tr><td class="nowrap"><b>${esc(groupName(g))}</b></td><td>${now}${last}${before}</td></tr>`;
+      const before = earlier.length ? `<div class="rp-run small"><span class="muted">Earlier:</span> ${earlier.map(r => `<span class="rp-item">${runReports(p.id, lane, r, 'btn sm')} ${resultPill(r)} <span class="muted">${esc(fmtWhen(finishedAt(r)))}</span></span>`).join('')}</div>` : '';
+      return { env: lane.env || 'other', html: `<tr><td class="nowrap"><b>${esc(lane.title)}</b></td><td>${now}${last}${before}</td></tr>` };
     }).filter(Boolean);
     if (!rows.length) return '';
-    return `<div class="card" style="margin-bottom:14px"><h3>Reports</h3><div class="tbl-wrap"><table class="tbl rp-tbl"><tbody>${rows.join('')}</tbody></table></div>${s.reportsError ? `<div class="small" style="color:var(--yellow-text);margin-top:8px">Some reports could not be stored for viewing here: ${esc(s.reportsError)}</div>` : ''}</div>`;
+    const envs = [...new Set(rows.map(r => r.env))].sort((a, b) => envRank(a) - envRank(b) || a.localeCompare(b));
+    const body = envs.map(env => `<tr class="rp-env"><th colspan="2">${esc(env)}</th></tr>${rows.filter(r => r.env === env).map(r => r.html).join('')}`).join('');
+    return `<div class="card" style="margin-bottom:14px"><h3>Reports</h3><div class="tbl-wrap"><table class="tbl rp-tbl"><tbody>${body}</tbody></table></div>${s.reportsError ? `<div class="small" style="color:var(--yellow-text);margin-top:8px">Some reports could not be stored for viewing here: ${esc(s.reportsError)}</div>` : ''}</div>`;
   }
 
   // The suite workflow is started from its picker, which names a suite and an environment.
@@ -1928,23 +1981,20 @@
     if (!s) return `<div class="card"><div class="empty">No CI source is configured for this project. Add it to <span class="mono">ci-sources.json</span> in the tracker repository and run the collector.</div></div>`;
     const t = s.tests || {}, runs = runsOf(s);
     const groups = s.groups || [];
-    const latest = groups.map(g => {
-      const r = runsOfGroup(s, g.id)[0];
-      return r ? `<span style="display:inline-block;margin:0 10px 4px 0">${resultPill(r)} <span class="small">${esc(KIND_TITLE[g.kind] || g.kind)}${g.env ? ' · ' + esc(g.env) : ''}</span> <span class="muted small">${esc(agoIso(r.startedAt))}</span></span>` : '';
-    }).join('');
     const head = `<div class="card" style="margin-bottom:14px"><h3>Source — ${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')} ${s.branch ? `<span class="pill">${esc(s.branch)}</span>` : ''} ${s.status === 'error' ? pill('red', 'could not be read') : s.status === 'ok' ? pill('green', 'read OK') : pill('grey', label(s.status || 'unknown'))}</h3>
       <div class="actions" style="float:right"><button class="btn sm" data-act="refresh-ci">↻ Refresh now</button></div>
       <dl class="kv">
-        ${latest ? `<dt>Latest of each</dt><dd>${latest}</dd>` : ''}
-        <dt>Tests in the repository</dt><dd>${t.functions != null ? `<b>${esc(String(t.functions))}</b> in ${esc(String(t.files))} files <span class="muted small">(${esc(t.method || '')}${t.commit ? ', commit ' + esc(t.commit) : ''}, counted ${esc(agoIso(t.countedAt))})</span>` : '<span class="muted">not counted yet</span>'}${s.testsError ? `<div class="small" style="color:var(--yellow-text)">could not count: ${esc(s.testsError)}</div>` : ''}</dd>
-        <dt>Read from the source</dt><dd>${s.collectedAt ? `${esc(fmtWhen(s.collectedAt))} UTC <span class="muted">(${snapMinutes() != null && snapMinutes() < 180 ? esc(snapMinutes() + ' min ago') : esc(agoIso(s.collectedAt))})</span>${snapMinutes() > 75 ? ' ' + pill('red', 'the hourly collection is not running') : ''}` : '<span class="muted">never</span>'}</dd>
+        <dt>Test functions in the repository</dt><dd>${t.functions != null ? `<b>${esc(String(t.functions))}</b> in ${esc(String(t.files))} files <span class="muted small">(${esc(t.method || '')}${t.commit ? ', commit ' + esc(t.commit) : ''}, counted ${esc(agoIso(t.countedAt))})</span>` : '<span class="muted">not counted yet</span>'}${s.testsError ? `<div class="small" style="color:var(--yellow-text)">could not count: ${esc(s.testsError)}</div>` : ''}</dd>
+        <dt>Read from the source</dt><dd>${s.collectedAt ? `${esc(fmtWhen(s.collectedAt))} UTC <span class="muted">(${snapMinutes() != null && snapMinutes() < 180 ? esc(snapMinutes() + ' min ago') : esc(agoIso(s.collectedAt))})</span>${snapMinutes() > 26 * 60 ? ' ' + pill('red', 'no collection for over a day') : ''}` : '<span class="muted">never</span>'}</dd>
         ${s.error ? `<dt>Error</dt><dd class="small" style="color:var(--red-text)">${esc(s.error)}</dd>` : ''}
         ${s.note ? `<dt>Note</dt><dd class="small">${esc(s.note)}</dd>` : ''}
         ${(s.reports || []).length ? `<dt>Reports</dt><dd class="rep-list">${reportLinks(p.id, '', s.reports)}</dd>` : ''}
         ${(s.downloads || []).length ? `<dt>Downloads</dt><dd>${s.downloads.map(d => `${link(d.url, d.name)} <span class="muted small">${d.size ? Math.round(d.size / 1024) + ' KB' : ''}${d.createdAt ? ' · ' + esc(fmtWhen(d.createdAt)) : ''}</span>`).join('<br>')}</dd>` : ''}
       </dl></div>`;
+    const envOf = r => Object.keys(r.envResults || {}).join(', ') || ((groupOf(s, r.group) || {}).dispatchInputs || {}).environment || r.activeEnv || r.env || '';
     const runRow = r => `<tr><td class="nowrap small">${esc(fmtWhen(r.startedAt))}<div class="muted">${esc(agoIso(r.startedAt))}</div></td>
       <td><b>${esc(r.name || '')}</b>${r.title && r.title !== r.name ? `<div class="muted small">${esc(trunc(r.title, 90))}</div>` : ''}${r.number ? `<div class="muted small">#${esc(String(r.number))}</div>` : ''}</td>
+      <td class="small">${esc(envOf(r))}</td>
       <td class="small">${esc(r.trigger || '')}${r.branch ? `<div class="muted">${esc(r.branch)}</div>` : ''}</td><td>${resultPill(r)}</td>
       <td class="small">${r.counts ? esc(countsText(r.counts)) : '<span class="muted">—</span>'}</td><td class="small nowrap">${esc(fmtDur(r.durationSec))}</td>
       <td class="small nowrap">${reportLinks(p.id, String(r.id), r.reports, `Report ${runLabel(r)}`)}${(r.reports || []).length && r.url ? ' · ' : ''}${r.url ? link(r.url, 'run') : ''}</td></tr>`;
@@ -1953,7 +2003,7 @@
     const kinds = [...new Set(groups.map(g => g.kind))];
     const blocks = kinds.map(kind => {
       const rows = groups.filter(g => g.kind === kind).map(g => {
-        const gr = runsOfGroup(s, g.id), last = gr[0];
+        const gr = runsOfGroup(s, g.id).filter(r => !r.tick), last = gr[0];
         const withRep = last && (last.reports || []).length ? last : gr.find(r => (r.reports || []).length);
         const groupAllure = !withRep ? '<span class="muted">—</span>'
           : withRep === last ? reportLinks(p.id, String(last.id), last.reports, `Report ${runLabel(last)}`)
@@ -1979,8 +2029,15 @@
         <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Environment</th><th>Last run (UTC)</th><th>Result</th><th>Tests</th><th>Duration</th><th>Runs before it</th><th>Report</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }).join('');
 
-    const flat = runs.length ? `<details><summary class="small" style="cursor:pointer;color:var(--accent);padding:8px 0">All ${runs.length} collected runs</summary>
-      <div class="card tbl-wrap" style="margin-top:8px"><table class="tbl"><thead><tr><th>When (UTC)</th><th>Job</th><th>Trigger</th><th>Result</th><th>Tests</th><th>Duration</th><th>Open</th></tr></thead><tbody>${runs.map(runRow).join('')}</tbody></table></div></details>` : '';
+    const hf = S.ciHist[p.id] ||= { kind: '', env: '' };
+    const ticks = runs.filter(r => r.tick).length;
+    const kept = runs.filter(r => !r.tick);
+    const shown = kept.filter(r => (!hf.kind || r.kind === hf.kind) && (!hf.env || envOf(r).split(', ').includes(hf.env)));
+    const sel = (key, values, all, name, show) => `<select data-hf="${key}" data-project="${esc(p.id)}" aria-label="${esc(name)}"><option value="">${esc(all)}</option>${values.map(v => `<option value="${esc(v)}"${hf[key] === v ? ' selected' : ''}>${esc(show(v))}</option>`).join('')}</select>`;
+    const kindsSeen = [...new Set(kept.map(r => r.kind))], envsSeen = [...new Set(kept.flatMap(r => envOf(r).split(', ')).filter(Boolean))];
+    const flat = kept.length ? `<details${hf.kind || hf.env ? ' open' : ''}><summary class="small" style="cursor:pointer;color:var(--accent);padding:8px 0">All ${kept.length} collected runs${ticks ? ` <span class="muted">(${ticks} idle deploy-watcher ticks left out)</span>` : ''}</summary>
+      <div class="filters" style="margin-top:8px">${sel('kind', kindsSeen, 'all kinds', 'Kind of run', v => KIND_TITLE[v] || label(v))} ${sel('env', envsSeen, 'all environments', 'Environment', v => v)}</div>
+      <div class="card tbl-wrap" style="margin-top:8px"><table class="tbl"><thead><tr><th>When (UTC)</th><th>Job</th><th>Environment</th><th>Trigger</th><th>Result</th><th>Tests</th><th>Duration</th><th>Open</th></tr></thead><tbody>${shown.map(runRow).join('') || '<tr><td colspan="8" class="empty">No run matches.</td></tr>'}</tbody></table></div></details>` : '';
     const empty = !groups.length ? `<div class="card"><div class="empty">${s.status === 'error' ? 'The collector could not read this source, so there is nothing to group yet.' : 'No jobs matched the classification rules for this source.'}</div></div>` : '';
     return head + blocks + empty + flat +
       `<p class="hint" style="margin-top:10px">“Report” shows the run's report inside this page; ↗ opens it in a new tab, where it can be saved. “Run” starts the job through the tracker's own workflow, so the token in this browser never needs access to the project's repository. A card at the top then follows the run: while the page stays open, it collects when the run usually ends (and once earlier when past runs often stopped early), then at most twice more, so one press costs at most four collections, and a collection anyone else starts meanwhile counts as one of them. The card turns into “Report ready” when the report is in.</p>`;
@@ -3165,6 +3222,7 @@
     $$('[data-filter]', v).forEach(el => el.addEventListener('change', () => { S.filter = { ...(S.filter || {}), [el.dataset.filter]: el.value }; render(); }));
     $$('.lesson-status', v).forEach(el => el.addEventListener('change', async () => { await setLesson(el.dataset.person, el.dataset.lesson, el.value); render(); }));
     $$('.drill-deck', v).forEach(el => el.addEventListener('change', () => { const s = drillLoad(el.dataset.course); s.deck = el.value; drillKeep(el.dataset.course, s); drillStart(el.dataset.course, el.value, false); render(); }));
+    $$('[data-hf]', v).forEach(el => el.addEventListener('change', () => { (S.ciHist[el.dataset.project] ||= { kind: '', env: '' })[el.dataset.hf] = el.value; render(); }));
     $$('[data-cf]', v).forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => { catFilterOf(el.dataset.project)[el.dataset.cf] = el.value; paintCatalog(el.dataset.project); }));
     $$('[data-goto]', v).forEach(el => el.addEventListener('click', () => { const t = document.getElementById(el.dataset.goto); if (t) t.scrollIntoView({ block: 'start' }); }));
     const af = $('[data-asst-form]', v);

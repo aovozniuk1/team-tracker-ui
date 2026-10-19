@@ -293,6 +293,7 @@ svg.key { flex: 0 0 auto; overflow: visible; }
 .ci-cell { margin: 2px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .rep-ext:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .rp-tbl td { vertical-align: top; }
+.rp-tbl tr.rp-env th { text-align: left; font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding-top: 12px; }
 .suite-run { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .rp-run { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 3px 0; }
 .rp-item { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-right: 10px; max-width: 100%; }
