@@ -481,3 +481,15 @@ body.public-view main.content { max-width: 980px; margin: 0 auto; }
 .pub-phase { margin-bottom: 12px; }
 .pub-phase h3 { margin-bottom: 6px; }
 .pub-lessons { margin: 0; padding-left: 1.6em; display: flex; flex-direction: column; gap: 4px; }
+.ai-form { align-items: flex-end; }
+.ai-form textarea { flex: 1 1 auto; min-width: 0; font: inherit; padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); resize: vertical; max-height: 40vh; }
+.ai-form textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ai-btns { display: flex; flex-direction: column; gap: 6px; }
+.ai-a h1, .ai-a h2, .ai-a h3 { font-size: 1.02rem; margin: 6px 0 0; }
+.ai-a ol, .ai-a ul { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 3px; }
+.ai-a table { border-collapse: collapse; font-size: .9rem; }
+.ai-a th, .ai-a td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
+.ai-a pre { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
+.ai-error { color: var(--red, #c0392b); }
+.ai-chats summary { cursor: pointer; font-weight: 600; }
+.ai-chats ul { margin-top: 8px; }

@@ -3058,6 +3058,143 @@
     return head + (t === 'browse' ? asstBrowse(kb) : t === 'changes' ? asstChanges(kb) : t === 'review' ? asstReview(kb) : asstAsk(kb));
   }
 
+  // ---------- the lead's own chat over the private knowledge base. A question starts the Ask
+  // workflow in the private repository; the answer lands in threads/<id>.json on its `ask` branch.
+  // Both live where only the lead's token reaches, so nobody else can ask or read.
+  const AI_KEY = LS + 'ai-chats';
+  const AI_REPO = GH_DEFAULT.privateRepo;
+  const AI_WAIT_MS = 15 * 60 * 1000;
+  const AI_HISTORY_CHARS = 40000;
+  const AI_STEPS = { 'Set up job': 'Запускаю', 'Run actions/checkout@v4': 'Готую базу знань', 'Run actions/setup-node@v4': 'Готую', 'Install Claude Code': 'Готую', 'Answer': 'Шукаю відповідь', 'Hand the answer to the page': 'Записую відповідь' };
+  S.ai = { chats: null, cur: '', polls: {}, status: {}, draft: '' };
+  const aiApi = p => `https://api.github.com/repos/${encodeURIComponent(ghConfig().owner)}/${encodeURIComponent(AI_REPO)}/${p}`;
+  function aiChats() {
+    if (!S.ai.chats) {
+      try { S.ai.chats = JSON.parse(localStorage.getItem(AI_KEY) || '[]'); } catch { S.ai.chats = []; }
+      if (!Array.isArray(S.ai.chats)) S.ai.chats = [];
+      S.ai.cur = (S.ai.chats[0] || {}).id || '';
+    }
+    return S.ai.chats;
+  }
+  function aiKeep() { try { localStorage.setItem(AI_KEY, JSON.stringify(aiChats().slice(0, 50))); } catch { /* the chats just won't survive a reload */ } }
+  const aiCurrent = () => aiChats().find(c => c.id === S.ai.cur) || null;
+  function aiNewId() { const a = new Uint8Array(6); crypto.getRandomValues(a); return `${Date.now().toString(36)}-${[...a].map(b => b.toString(16).padStart(2, '0')).join('')}`; }
+  // The answered turns before this one, newest kept first when they have to be cut to fit the dispatch.
+  function aiHistory(turns, limit) {
+    const out = [];
+    let size = 2;
+    for (const t of [...turns].reverse()) {
+      if (!t.a) continue;
+      const item = { q: t.q, a: String(t.a).slice(0, 2500) }, n = JSON.stringify(item).length + 1;
+      if (size + n > limit || out.length >= 6) break;
+      out.unshift(item); size += n;
+    }
+    return out;
+  }
+  // Paths of the knowledge base in an answer open the file in the private repository.
+  function aiLinkPaths(html, owner, repo) {
+    return html.replace(/<code>((?:kb|courses)\/[^<\s]+?\.(?:md|txt|json))<\/code>/g,
+      (m, p) => `<a href="https://github.com/${owner}/${repo}/blob/main/${p}" target="_blank" rel="noopener"><code>${p}</code></a>`);
+  }
+  async function aiAsk(q) {
+    if (S.backend !== 'github') { toast('Connect this page to GitHub first (Data → Connect to GitHub)'); return; }
+    let chat = aiCurrent();
+    if (!chat) { chat = { id: aiNewId(), title: q.slice(0, 80), turns: [] }; aiChats().unshift(chat); S.ai.cur = chat.id; }
+    const turn = { id: aiNewId(), q, at: new Date().toISOString(), status: 'asking' };
+    const history = aiHistory(chat.turns, AI_HISTORY_CHARS);
+    chat.turns.push(turn); S.ai.draft = ''; aiKeep(); render();
+    try {
+      const r = await fetch(aiApi('actions/workflows/ask.yml/dispatches'), {
+        method: 'POST', headers: { ...ghHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ref: 'main', inputs: { id: turn.id, question: q.slice(0, 8000), history: JSON.stringify(history) } }),
+      });
+      if (r.status !== 204) {
+        const err = await ghError(r);
+        turn.status = 'failed';
+        turn.error = r.status === 403 || r.status === 404 ? `Не вдалося запустити (${err}). Токену потрібні “Actions: read and write” на ${AI_REPO}, а в ньому — workflow ask.yml.` : `Не вдалося запустити: ${err}`;
+      } else turn.status = 'waiting';
+    } catch { turn.status = 'failed'; turn.error = 'GitHub не відповідає'; }
+    aiKeep(); render();
+    if (turn.status === 'waiting') aiPoll(chat.id, turn.id);
+  }
+  function aiFind(chatId, turnId) { const c = aiChats().find(x => x.id === chatId); return c ? c.turns.find(t => t.id === turnId) : null; }
+  async function aiRun(turn) {
+    const r = await fetch(aiApi('actions/workflows/ask.yml/runs?event=workflow_dispatch&per_page=20'), { headers: ghHeaders(), cache: 'no-store' });
+    if (!r.ok) return null;
+    const run = ((await r.json()).workflow_runs || []).find(x => x.display_title === `ask ${turn.id}`);
+    if (!run) return null;
+    const st = { url: run.html_url, status: run.status, conclusion: run.conclusion, step: '' };
+    if (run.status === 'in_progress') {
+      const j = await fetch(aiApi(`actions/runs/${run.id}/jobs`), { headers: ghHeaders(), cache: 'no-store' });
+      if (j.ok) { const s = (((await j.json()).jobs || [])[0] || {}).steps || []; const cur = s.find(x => x.status === 'in_progress'); st.step = cur ? (AI_STEPS[cur.name] || cur.name) : ''; }
+    }
+    return st;
+  }
+  function aiPaintStatus(turn) {
+    const el = document.querySelector(`[data-ai-turn="${turn.id}"] .ai-status`);
+    if (!el) return;
+    const st = S.ai.status[turn.id] || {}, secs = Math.round((Date.now() - Date.parse(turn.at)) / 1000);
+    el.innerHTML = `${esc(st.step || (st.status === 'queued' ? 'У черзі' : 'Запускаю'))} · ${secs} с${st.url ? ` · <a href="${esc(st.url)}" target="_blank" rel="noopener">запуск</a>` : ''}`;
+  }
+  async function aiPoll(chatId, turnId) {
+    if (S.ai.polls[turnId]) return;
+    S.ai.polls[turnId] = true;
+    let n = 0;
+    const tick = async () => {
+      const turn = aiFind(chatId, turnId);
+      if (!turn || turn.status !== 'waiting') { delete S.ai.polls[turnId]; return; }
+      n++;
+      try {
+        const r = await fetch(aiApi(`contents/threads/${encodeURIComponent(turnId)}.json?ref=ask`), { headers: { ...ghHeaders(), Accept: 'application/vnd.github.raw' }, cache: 'no-store' });
+        if (r.ok) {
+          const res = JSON.parse(await r.text());
+          Object.assign(turn, { status: res.answer ? 'answered' : 'failed', a: res.answer || '', error: res.answer ? '' : (res.error || 'відповіді немає'), seconds: res.seconds || null });
+          delete S.ai.polls[turnId]; aiKeep(); if (S.route.name === 'ask') render(); return;
+        }
+        if (n % 3 === 1) {
+          const st = await aiRun(turn);
+          if (st) {
+            S.ai.status[turnId] = st;
+            if (st.status === 'completed' && st.conclusion !== 'success' && n > 6) {
+              Object.assign(turn, { status: 'failed', error: `Запуск завершився без відповіді (${st.conclusion}).`, runUrl: st.url });
+              delete S.ai.polls[turnId]; aiKeep(); if (S.route.name === 'ask') render(); return;
+            }
+          }
+        }
+      } catch { /* a missed poll is retried on the next tick */ }
+      if (Date.now() - Date.parse(turn.at) > AI_WAIT_MS) {
+        Object.assign(turn, { status: 'failed', error: 'Відповіді немає вже 15 хвилин.' });
+        delete S.ai.polls[turnId]; aiKeep(); if (S.route.name === 'ask') render(); return;
+      }
+      if (S.route.name === 'ask') aiPaintStatus(turn);
+      setTimeout(tick, 4000);
+    };
+    tick();
+  }
+  function aiResume() {
+    if (S.backend !== 'github') return;
+    for (const c of aiChats()) for (const t of c.turns) if (t.status === 'waiting') aiPoll(c.id, t.id);
+  }
+  function aiTurn(t) {
+    const g = ghConfig();
+    const body = t.status === 'answered' ? aiLinkPaths(renderMarkdown(t.a).html, g.owner, AI_REPO)
+      : t.status === 'failed' ? `<p class="ai-error">${esc(t.error || 'Не вдалося')}${t.runUrl ? ` · <a href="${esc(t.runUrl)}" target="_blank" rel="noopener">запуск</a>` : ''}</p><button type="button" class="btn ghost sm" data-ai-retry="${esc(t.id)}">Спитати ще раз</button>`
+      : `<p class="ai-status muted">Запускаю…</p>`;
+    return `<div class="asst-turn" data-ai-turn="${esc(t.id)}"><div class="asst-q">${esc(t.q)}</div><div class="card asst-a ai-a">${body}
+      ${t.status === 'answered' ? `<div class="small muted">${esc(new Date(t.at).toLocaleString('uk-UA'))}${t.seconds ? ` · ${t.seconds} с` : ''}</div>` : ''}</div></div>`;
+  }
+  function vAsk() {
+    const chats = aiChats(), chat = aiCurrent();
+    setTimeout(aiResume, 0);
+    const head = `<div class="page-head"><div><h1>Ask AI</h1><div class="sub">Відповіді за приватною базою знань: Zoho CRM, Zoho Projects, Zoho One, онбординг, наші клієнтські проєкти · відповідь за 1–2 хв</div></div></div>`;
+    if (S.backend !== 'github') return head + '<div class="empty">Підключи GitHub на сторінці <a href="#/data">Data</a>.</div>';
+    const others = chats.filter(c => c !== chat);
+    const list = others.length ? `<details class="card ai-chats"><summary>Попередні розмови <span class="pill">${others.length}</span></summary><ul class="plain">${others.map(c => `<li><button type="button" class="linkish" data-ai-open="${esc(c.id)}">${esc(c.title)}</button> <span class="small muted">${c.turns.length} пит.</span></li>`).join('')}</ul></details>` : '';
+    const turns = chat ? chat.turns.map(aiTurn).join('') : `<div class="card asst-intro"><p>Питай будь-що по роботі: як зробити щось у CRM чи Projects, яким інструментом, чому щось не працює, що каже онбординг. Відповідь шукається в нашій базі знань і курсах, а коли там немає — у довідці Zoho, і це буде сказано.</p></div>`;
+    return head + `<div class="asst">${list}${turns}
+      <form class="asst-form ai-form" data-ai-form><textarea name="q" rows="2" data-ai-draft placeholder="Постав питання (Ctrl+Enter — надіслати)" aria-label="Твоє питання" required>${esc(S.ai.draft)}</textarea><div class="ai-btns"><button class="btn primary" type="submit">Запитати</button>${chat ? '<button class="btn ghost" type="button" data-act="ai-new">Нова розмова</button>' : ''}</div></form></div>`;
+  }
+
   // Ranks the assistant's entries and document passages for a question: BM25 over weighted fields,
   // a light stemmer for English and Ukrainian, Ukrainian words mapped to the English terms the
   // entries use, and prefix matches for word forms the stemmer misses. Self-contained, so its test
@@ -3149,8 +3286,8 @@
   }
 
   // ---------- nav + router
-  const NAV = [['dashboard', 'Dashboard', '⌂', 'Home'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['assistant', 'Assistant', '?', 'Ask'], ['courses', 'Courses', '❏', 'Courses'], ['stats', 'Team stats', '∑', 'Stats'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
-  const LEAD_ONLY = new Set(['stats']);
+  const NAV = [['dashboard', 'Dashboard', '⌂', 'Home'], ['projects', 'Projects', '▤'], ['people', 'People', '☺'], ['learning', 'Learning', '✎'], ['assistant', 'Assistant', '?', 'Ask'], ['ask', 'Ask AI', '✦', 'AI'], ['courses', 'Courses', '❏', 'Courses'], ['stats', 'Team stats', '∑', 'Stats'], ['ci', 'CI', '▶'], ['data', 'Data', '⚙']];
+  const LEAD_ONLY = new Set(['stats', 'ask']);
   const navHref = k => k === 'dashboard' ? '#/' : k === 'learning' && !canSeeHistory() && signedInAs() ? `#/people/${signedInAs()}/learning` : `#/${k}`;
   function navKey() {
     const r = S.route;
@@ -3194,7 +3331,7 @@
     const views = {
       dashboard: () => vDashboard(), projects: () => r.id ? vProject(r.id) : vProjects(), people: () => r.id ? vPerson(r.id) : vPeople(),
       learning: () => vLearning(r.id), lesson: () => vLesson(r.id, r.tab), drill: () => vDrill(r.id), assistant: () => vAssistant(r.id), activity: () => vDashboard(),
-      courses: () => r.id ? vCourse(r.id) : vCourses(), read: () => vRead(r.id, r.tab), stats: () => canSeeHistory() ? vStats() : vDashboard(), ci: () => vCI(), data: () => vData(),
+      courses: () => r.id ? vCourse(r.id) : vCourses(), read: () => vRead(r.id, r.tab), stats: () => canSeeHistory() ? vStats() : vDashboard(), ask: () => canSeeHistory() ? vAsk() : vDashboard(), ci: () => vCI(), data: () => vData(),
     };
     // a course reader with no connection is a visitor from outside: the courses alone, no tracker around them
     const pub = isPublicRoute(r) && S.backend === 'static';
@@ -3229,6 +3366,15 @@
     const af = $('[data-asst-form]', v);
     if (af) af.addEventListener('submit', e => { e.preventDefault(); const q = af.elements.q.value.trim(); if (q) ask({ q }); });
     $$('[data-asst-q]', v).forEach(b => b.addEventListener('click', () => ask({ q: b.dataset.asstQ })));
+    const aif = $('[data-ai-form]', v);
+    if (aif) {
+      const ta = aif.elements.q, send = () => { const q = ta.value.trim(); if (q) aiAsk(q); };
+      ta.addEventListener('input', () => { S.ai.draft = ta.value; });
+      ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
+      aif.addEventListener('submit', e => { e.preventDefault(); send(); });
+    }
+    $$('[data-ai-open]', v).forEach(b => b.addEventListener('click', () => { S.ai.cur = b.dataset.aiOpen; const c = aiCurrent(); if (c) { aiChats().splice(aiChats().indexOf(c), 1); aiChats().unshift(c); aiKeep(); } render(); }));
+    $$('[data-ai-retry]', v).forEach(b => b.addEventListener('click', () => { const c = aiCurrent(), t = c && c.turns.find(x => x.id === b.dataset.aiRetry); if (t) { c.turns.splice(c.turns.indexOf(t), 1); aiKeep(); aiAsk(t.q); } }));
     $$('[data-asst-e]', v).forEach(b => b.addEventListener('click', () => { const e = S.asst.kb && asstMap(S.asst.kb, 'entries').get(b.dataset.asstE); if (e) ask({ e: e.id, q: e.title }); }));
     // Only the cells of the viewer's own row take a click; the rest only show their title.
     $$('td.cell:not(.ro)', v).forEach(td => {
@@ -3281,6 +3427,7 @@
         try { localStorage.removeItem(ASK_KEY); } catch { /* nothing kept */ }
         return render();
       }
+      case 'ai-new': S.ai.cur = ''; S.ai.draft = ''; return render();
       case 'drill-show': if (S.drill && S.drill.queue.length) S.drill.shown = true; return render();
       case 'drill-yes': drillAnswer(true); return render();
       case 'drill-no': drillAnswer(false); return render();
