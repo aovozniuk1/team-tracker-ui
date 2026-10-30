@@ -2478,7 +2478,7 @@
       .then(text => ({ text }), e => ({ error: e.message })).then(res => { S.pub.lessons[key] = res; if (S.route.name === 'read') render(); });
   }
   const pubLessons = c => c.phases.flatMap(ph => ph.lessons.map(l => ({ ...l, phaseName: ph.name })));
-  const pubHead = () => S.backend === 'static' ? `<div class="pub-brand"><a href="#/courses">Zoho: курси онбордингу</a></div>` : '';
+  const pubHead = () => S.backend === 'static' ? `<div class="pub-brand"><a href="#/courses">Курси</a></div>` : '';
   function pubState() {
     wantPubIndex();
     const ix = S.pub.index;
@@ -2488,7 +2488,7 @@
   }
   function vCourses() {
     const { wait, ix } = pubState(); if (wait) return wait;
-    return `${pubHead()}<div class="page-head"><div><h1>Zoho: курси онбордингу</h1><div class="sub">Покрокові курси з Zoho CRM і Zoho Projects: пояснення, прохід завдань у продукті, розбір з боку QA, задачі й розв'язки. Вхід не потрібен.</div></div></div>
+    return `${pubHead()}<div class="page-head"><div><h1>Курси</h1><div class="sub">Покрокові курси з нуля: Zoho CRM, Zoho Projects і робота з ШІ. Пояснення, практика, розбір з боку QA, задачі й розв'язки. Вхід не потрібен.</div></div></div>
       <div class="pub-courses">${ix.courses.map(c => `<div class="card clickable" data-href="#/courses/${esc(c.id)}"><h3><a href="#/courses/${esc(c.id)}">${esc(c.name)}</a></h3><p class="small">${esc(c.description)}</p><div class="small muted">Фаз: ${c.phases.length} · уроків: ${pubLessons(c).length}</div></div>`).join('')}${ownCards(ix)}</div>`;
   }
   // the lead's own courses that carry a card show here for the lead only, next to the public ones
@@ -3336,7 +3336,7 @@
     // a course reader with no connection is a visitor from outside: the courses alone, no tracker around them
     const pub = isPublicRoute(r) && S.backend === 'static';
     document.body.classList.toggle('public-view', pub);
-    document.title = pub ? 'Zoho: курси онбордингу' : 'Team Tracker';
+    document.title = pub ? 'Курси' : 'Team Tracker';
     const notice = pub ? '' : S.backend === 'static' && r.name !== 'data' ? '<div class="banner">Not connected: edits stay in this browser only. <a href="#/data">Connect to GitHub</a> or run <span class="mono">python serve.py</span>.</div>' : S.ghError && r.name !== 'data' ? `<div class="banner">GitHub could not be read: ${esc(S.ghError)}. <a href="#/data">Check the connection</a>.</div>` : '';
     v.innerHTML = notice + (views[r.name] || views.dashboard)();
     bind(v);
