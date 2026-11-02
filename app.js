@@ -2486,10 +2486,11 @@
     if (ix.error || !ix.courses.length) return { wait: `${pubHead()}<div class="empty">Курсів тут поки немає${ix.error ? ` (${esc(ix.error)})` : ''}.</div>` };
     return { ix };
   }
+  const LEARN_CARD = `<div class="card"><h3><a href="https://crmoz-learn.crmoz.workers.dev" target="_blank" rel="noopener">ШІ в роботі: Claude Code з нуля</a></h3><p class="small">Курс з нуля про роботу з ШІ-агентом Claude Code: 20 уроків з підказками, тестами й практичними завданнями, бали й поріг проходження. Проходиться на навчальній платформі.</p><div class="small muted">Вхід — робочим Zoho-акаунтом компанії</div></div>`;
   function vCourses() {
     const { wait, ix } = pubState(); if (wait) return wait;
-    return `${pubHead()}<div class="page-head"><div><h1>Курси</h1><div class="sub">Покрокові курси з нуля: Zoho CRM, Zoho Projects і робота з ШІ. Пояснення, практика, розбір з боку QA, задачі й розв'язки. Вхід не потрібен.</div></div></div>
-      <div class="pub-courses">${ix.courses.map(c => `<div class="card clickable" data-href="#/courses/${esc(c.id)}"><h3><a href="#/courses/${esc(c.id)}">${esc(c.name)}</a></h3><p class="small">${esc(c.description)}</p><div class="small muted">Фаз: ${c.phases.length} · уроків: ${pubLessons(c).length}</div></div>`).join('')}${ownCards(ix)}</div>`;
+    return `${pubHead()}<div class="page-head"><div><h1>Курси</h1><div class="sub">Покрокові курси з нуля: Zoho CRM, Zoho Projects і робота з ШІ. Пояснення, практика, розбір з боку QA, задачі й розв'язки.</div></div></div>
+      <div class="pub-courses">${ix.courses.map(c => `<div class="card clickable" data-href="#/courses/${esc(c.id)}"><h3><a href="#/courses/${esc(c.id)}">${esc(c.name)}</a></h3><p class="small">${esc(c.description)}</p><div class="small muted">Фаз: ${c.phases.length} · уроків: ${pubLessons(c).length}</div></div>`).join('')}${LEARN_CARD}${ownCards(ix)}</div>`;
   }
   // the lead's own courses that carry a card show here for the lead only, next to the public ones
   function ownCards(ix) {
