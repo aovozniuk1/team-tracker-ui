@@ -2486,7 +2486,7 @@
     if (ix.error || !ix.courses.length) return { wait: `${pubHead()}<div class="empty">Курсів тут поки немає${ix.error ? ` (${esc(ix.error)})` : ''}.</div>` };
     return { ix };
   }
-  const LEARN_CARD = `<div class="card"><h3><a href="https://crmoz-learn.crmoz.workers.dev" target="_blank" rel="noopener">ШІ в роботі: Claude Code з нуля</a></h3><p class="small">Курс з нуля про роботу з ШІ-агентом Claude Code: 20 уроків з підказками, тестами й практичними завданнями, бали й поріг проходження. Проходиться на навчальній платформі.</p><div class="small muted">Вхід — робочим Zoho-акаунтом компанії</div></div>`;
+  const LEARN_CARD = `<div class="card"><h3><a href="https://crmoz-learn.crmoz.workers.dev" target="_blank" rel="noopener">ШІ в роботі: Claude Code з нуля</a></h3><p class="small">Курс з нуля про роботу з ШІ-агентом Claude Code: 20 уроків з підказками, тестами й практичними завданнями, бали й поріг проходження. Звірено з Claude Code 2.1.329 станом на 20.11.2026. Проходиться на навчальній платформі.</p><div class="small muted">Вхід — робочим Zoho-акаунтом компанії</div></div>`;
   function vCourses() {
     const { wait, ix } = pubState(); if (wait) return wait;
     return `${pubHead()}<div class="page-head"><div><h1>Курси</h1><div class="sub">Покрокові курси з нуля: Zoho CRM, Zoho Projects і робота з ШІ. Пояснення, практика, розбір з боку QA, задачі й розв'язки.</div></div></div>
