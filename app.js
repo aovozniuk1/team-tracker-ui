@@ -515,7 +515,11 @@
   const isoMs = iso => Date.parse(String(iso || '').replace(/(\.\d{3})\d+/, '$1'));
   const fmtBytes = b => !(b > 0) ? '' : b >= 1048576 ? `${(b / 1048576).toFixed(b >= 10485760 ? 0 : 1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
   const groupOf = (s, gid) => ((s && s.groups) || []).find(g => g.id === gid) || null;
-  const groupName = g => g ? `${KIND_TITLE[g.kind] || label(g.kind)}${g.env ? ' · ' + g.env : ''}` : '';
+  // A targeted suite runs one part of the tests on an environment; any other group is the environment alone.
+  const partOf = g => (g.dispatchInputs || {}).suite || g.part || '';
+  const envName = g => (g.dispatchInputs || {}).environment || g.env || '';
+  const whereOf = g => partOf(g) ? `${partOf(g)} on ${envName(g)}` : envName(g);
+  const groupName = g => g ? `${KIND_TITLE[g.kind] || label(g.kind)}${whereOf(g) ? ' · ' + whereOf(g) : ''}` : '';
   const isFinished = r => (r.status || '').toLowerCase() === 'completed';
 
   // ---------- run reports shown inside the page
@@ -1106,8 +1110,8 @@
       const s = ciSource(p.id);
       if (!s) continue;
       const bad = failingGroups(s);
-      const reg = bad.filter(g => g.kind === 'regression').map(g => g.env || g.title);
-      const rest = bad.filter(g => g.kind !== 'regression').map(g => `${KIND_TITLE[g.kind] || g.kind} ${g.env || ''}`.trim());
+      const reg = bad.filter(g => g.kind === 'regression').map(g => whereOf(g) || g.title);
+      const rest = bad.filter(g => g.kind !== 'regression').map(g => `${KIND_TITLE[g.kind] || g.kind} ${whereOf(g)}`.trim());
       if (reg.length) out.push({ lvl: 'red', text: `${p.name}: regression failing on ${reg.join(', ')}`, href: `#/projects/${p.id}/ci` });
       if (rest.length) out.push({ lvl: 'yellow', text: `${p.name}: failing ${rest.join('; ')}`, href: `#/projects/${p.id}/ci` });
       if (s.status === 'error') out.push({ lvl: 'yellow', text: `${p.name}: CI collector cannot read ${s.repoName || 'the source'} — ${trunc(s.error, 80)}`, href: `#/ci` });
@@ -1936,8 +1940,7 @@
         }
         continue;
       }
-      const pick = g.dispatchInputs;
-      lanes.push({ env: pick ? pick.environment : g.env, title: pick ? `${kind} · ${pick.suite}` : kind, reportOf: () => true, runs: gr });
+      lanes.push({ env: envName(g), title: partOf(g) ? `${kind} · ${partOf(g)}` : kind, reportOf: () => true, runs: gr });
     }
     return lanes;
   }
@@ -2015,7 +2018,10 @@
           return `<span style="display:inline-block;text-align:center;margin-right:7px" title="${esc(fmtWhen(r.startedAt))} UTC — ${esc(res)}${r.counts ? ', ' + esc(countsText(r.counts)) : ''}">
             <span class="mono" style="color:${cls}">${mark}</span><br><span class="muted" style="font-size:.7rem">${esc((r.startedAt || '').slice(5, 10))}</span></span>`;
         }).join('');
-        return `<tr><td><b>${esc(g.env || g.title)}</b><div class="muted small">${esc(g.workflowFile || '')}</div></td>
+        const named = (text, note) => `<td><b>${esc(text)}</b>${note ? `<div class="muted small">${esc(note)}</div>` : ''}</td>`;
+        const place = kind === 'suite' ? named(partOf(g) || '—', g.workflowFile) + `<td>${esc(envName(g) || '—')}</td>`
+          : named(envName(g) || g.title, [g.workflowFile, partOf(g)].filter(Boolean).join(' · '));
+        return `<tr>${place}
           <td class="small nowrap">${last ? `${esc(fmtWhen(last.startedAt))}<div class="muted">${esc(agoIso(last.startedAt))}</div>` : '<span class="muted">never run</span>'}</td>
           <td>${last ? resultPill(last) : ''}</td>
           <td class="small">${last && last.counts ? esc(countsText(last.counts)) : '<span class="muted">—</span>'}</td>
@@ -2027,7 +2033,7 @@
             : `<button class="btn sm" disabled title="Only ${esc((s.allowedActors || []).join(', ') || 'the lead')} can start this one${s.restrictedNote ? ' — ' + esc(s.restrictedNote) : ''}">🔒 Run</button>`}${g.workflowUrl ? ' ' + link(g.workflowUrl, 'on ' + (s.kind === 'github' ? 'GitHub' : 'Bitbucket')) : ''}</td></tr>`;
       }).join('');
       return `<div class="section"><div class="section-head"><h3>${esc(KIND_TITLE[kind] || label(kind))}</h3>${kind === 'suite' ? suitePicker(p, s) : ''}</div>
-        <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Environment</th><th>Last run (UTC)</th><th>Result</th><th>Tests</th><th>Duration</th><th>Runs before it</th><th>Report</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+        <div class="card tbl-wrap"><table class="tbl"><thead><tr>${kind === 'suite' ? '<th>Suite</th>' : ''}<th>Environment</th><th>Last run (UTC)</th><th>Result</th><th>Tests</th><th>Duration</th><th>Runs before it</th><th>Report</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
     }).join('');
 
     const hf = S.ciHist[p.id] ||= { kind: '', env: '' };
@@ -2146,7 +2152,7 @@
         const r = runsOf(s).find(x => x.group === g.id); if (!r) return '';
         const rr = newestInline(s, g.id), i = firstInline(rr);
         const rep = rr ? ` ${reportBtn(p.id, String(rr.id), rr.reports[i], i, 'Report', 'btn sm')}` : '';
-        return `<div class="small ci-cell">${resultPill(r)} <span class="muted">${esc(KIND_TITLE[g.kind] || g.kind)} ${esc(g.env || '')} · ${esc(agoIso(r.startedAt))}</span>${rep}</div>`;
+        return `<div class="small ci-cell">${resultPill(r)} <span class="muted">${esc(KIND_TITLE[g.kind] || g.kind)} ${esc(whereOf(g))} · ${esc(agoIso(r.startedAt))}</span>${rep}</div>`;
       }).join('') : '';
       return `<tr><td>${prlink(p.id)}<div class="muted small">${esc(p.code || '')}</div></td>
         <td class="small">${s ? `${esc(kindName(s.kind))}: ${s.url ? link(s.url, s.repoName) : esc(s.repoName || '')}${s.note ? `<div class="muted">${esc(trunc(s.note, 90))}</div>` : ''}` : '<span class="muted">no source configured</span>'}</td>
@@ -2894,7 +2900,7 @@
         lines.push(`  tests: ${src.tests ? src.tests.functions + ' functions' : 'not counted'}${src.status === 'error' ? '; collector error: ' + src.error : ''}`);
         for (const g of (src.groups || [])) {
           const r = runsOf(src).find(x => x.group === g.id);
-          if (r) lines.push(`    ${(KIND_TITLE[g.kind] || g.kind)} ${g.env || ''}: ${runResult(r)} (${agoIso(r.startedAt)})${r.counts ? ', ' + countsText(r.counts) : ''}`);
+          if (r) lines.push(`    ${(KIND_TITLE[g.kind] || g.kind)} ${whereOf(g)}: ${runResult(r)} (${agoIso(r.startedAt)})${r.counts ? ', ' + countsText(r.counts) : ''}`);
         }
       }
       for (const w of (p.workstreams || []).filter(w => w.status === 'active')) lines.push(`  • ${w.name}${w.ownerId ? ' — ' + pname(w.ownerId) : ''}${w.next ? ': ' + w.next : ''}`);
